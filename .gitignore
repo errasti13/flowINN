@@ -1,0 +1,116 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb_checkpoints/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Project specific
+data/training/*
+data/validation/*
+!data/training/.gitkeep
+!data/validation/.gitkeep
+models/*.h5
+models/*.pkl
+wandb/
+results/
+logs/
+*.log
+
+# Model files and data
+*.h5
+*.hdf5
+*.pkl
+*.npz
+*.npy
+*.csv
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Documentation
+docs/_build/
+docs/generated/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Weights & Biases
+wandb/
+
+# TensorFlow specific
+*.ckpt
+*.pb
+checkpoint
+model.ckpt.*
