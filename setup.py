@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="mustinn",
+    name="flowinn",
     version="0.1.0",
     packages=find_packages(),
     install_requires=[
@@ -12,7 +12,7 @@ setup(
     ],
     author="Jon Errasti Odriozola",
     author_email="errasti13@gmail.com",
-    description="MusTINN: Multi-Scale Turbulent Flow Investigation using Neural Networks",
+    description="fl0wINN: Multi-Scale Turbulent Flow Investigation using Neural Networks",
     keywords="physics-informed neural networks, computational fluid dynamics, turbulence modeling",
     python_requires='>=3.8',
 )
