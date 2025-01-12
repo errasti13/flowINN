@@ -1,11 +1,11 @@
 import numpy as np
 
 class Mesh:
-    def __init__(self):
+    def __init__(self, is2D = True):
         self.X = None
         self.Y = None
         self.Z = None
-        self.is2D = True  # Default is 2D until explicitly set to 3D during mesh generation
+        self.is2D = is2D  # Default is 2D until explicitly set to 3D during mesh generation
 
         self.boundaries = {}
 
@@ -47,7 +47,6 @@ class Mesh:
             if Nz > 1:
                 self.Z = (np.random.rand(nPoints) * (z_max - z_min) + z_min).astype(np.float32)
 
-
         elif sampling_method == 'uniform':
             self.X = np.linspace(x_min, x_max, nPoints, dtype=np.float32)
             self.Y = np.linspace(y_min, y_max, nPoints, dtype=np.float32)
@@ -56,8 +55,7 @@ class Mesh:
 
         else:
             raise ValueError(f"Unsupported sampling method: {sampling_method}")
-
-
+        
         return 
     
 
