@@ -7,12 +7,7 @@ class Mesh:
         self.Z = None
         self.is2D = True  # Default is 2D until explicitly set to 3D during mesh generation
 
-        self.boundaries = {
-            'left': {'x': None, 'y': None, 'u': None, 'v': None, 'p': None},
-            'right': {'x': None, 'y': None, 'u': None, 'v': None, 'p': None},
-            'bottom': {'x': None, 'y': None, 'u': None, 'v': None, 'p': None},
-            'top': {'x': None, 'y': None, 'u': None, 'v': None, 'p': None}
-        }
+        self.boundaries = {}
 
     def generateMesh(self, x_range, y_range, z_range=None, Nx=100, Ny=100, Nz=None, sampling_method='random'):
         # Validate inputs
@@ -66,45 +61,18 @@ class Mesh:
         return 
     
 
-    def setBoundaryCodition(self, N0, x_min, x_max, y_min, y_max, sampling_method='uniform'):
+    def setBoundaryCodition(self, xCoord, yCoord, value, varName, boundaryName, zCoord = None):
+        if boundaryName not in self.boundaries:
+            raise ValueError(f"Boundary name '{boundaryName}' is not valid. Available boundaries are: {list(self.boundaries.keys())}")
+        
+        if varName not in self.boundaries[boundaryName]:
+            raise ValueError(f"Variable name '{varName}' is not valid for boundary '{boundaryName}'. Available variables are: {list(self.boundaries[boundaryName].keys())}")
+    
+        self.boundaries[boundaryName]['x'] = xCoord
+        self.boundaries[boundaryName]['y'] = yCoord
 
-        if sampling_method == 'random':
-            # Random sampling of boundary points
-            self.boundaries['left']['x'] = np.full((N0, 1), x_min, dtype=np.float32)
-            self.boundaries['left']['y'] = np.random.rand(N0, 1) * (y_max - y_min) + y_min
+        if self.is2D is not True:
+            self.boundaries[boundaryName]['z'] = zCoord
 
-            self.boundaries['right']['x'] = np.full((N0, 1), x_max, dtype=np.float32)
-            self.boundaries['right']['y'] = np.random.rand(N0, 1) * (y_max - y_min) + y_min
-
-            self.boundaries['bottom']['y'] = np.full((N0, 1), y_min, dtype=np.float32)
-            self.boundaries['bottom']['x'] = np.random.rand(N0, 1) * (x_max - x_min) + x_min
-
-            self.boundaries['top']['y'] = np.full((N0, 1), y_max, dtype=np.float32)
-            self.boundaries['top']['x'] = np.random.rand(N0, 1) * (x_max - x_min) + x_min
-
-        elif sampling_method == 'uniform':
-            # Uniform grid of boundary points
-            yBc = np.linspace(y_min, y_max, N0)[:, None].astype(np.float32)
-            xBc = np.linspace(x_min, x_max, N0)[:, None].astype(np.float32)
-
-            self.boundaries['left']['x'] = np.full_like(yBc, x_min, dtype=np.float32)
-            self.boundaries['left']['y'] = yBc
-
-            self.boundaries['right']['x'] = np.full_like(yBc, x_max, dtype=np.float32)
-            self.boundaries['right']['y'] = yBc
-
-            self.boundaries['bottom']['y'] = np.full_like(xBc, y_min, dtype=np.float32)
-            self.boundaries['bottom']['x'] = xBc
-
-            self.boundaries['top']['y'] = np.full_like(xBc, y_max, dtype=np.float32)
-            self.boundaries['top']['x'] = xBc
-        else:
-            raise ValueError("sampling_method should be 'random' or 'uniform'")
-
-        for key in self.boundaries:
-            self.boundaries[key]['u'] = np.zeros_like(self.boundaries[key]['x'], dtype=np.float32) 
-            self.boundaries[key]['v'] = np.zeros_like(self.boundaries[key]['y'], dtype=np.float32)
-
-        self.boundaries['top']['u'] = np.ones_like(self.boundaries['top']['x'], dtype=np.float32)
-
+        self.boundaries[boundaryName][varName] = value
         return
