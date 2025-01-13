@@ -4,9 +4,11 @@ def main():
     x_range = (-1, 1)
     y_range = (-1, 1)
 
-    equation = LidDrivenCavity(x_range, y_range)
+    equation = LidDrivenCavity('LidDrivenCavity', x_range, y_range)
     
     equation.generateMesh()
+
+    equation.train()
 
     return
 
