@@ -1,6 +1,7 @@
 from src.physics.steadyNS import NavierStokes2D, NavierStokes3D
-import numpy as np
 import tensorflow as tf
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 class NavierStokesLoss:
 
@@ -12,6 +13,12 @@ class NavierStokesLoss:
 
         self.loss = None
 
+    def loss_function(self):
+         if self.mesh.is2D == True:
+              self.loss_function2D()
+
+         return
+
     def loss_function2D(self):
         X = tf.convert_to_tensor(self.mesh.X, dtype=tf.float32)
         Y = tf.convert_to_tensor(self.mesh.Y, dtype=tf.float32)
@@ -20,7 +27,7 @@ class NavierStokesLoss:
         Y = tf.reshape(Y, [-1, 1])
 
         with tf.GradientTape(persistent=True) as tape:
-            coords = tf.concat([X, Y], axis=1)
+            coords  = tf.concat([X, Y], axis=1)
             uvp_pred = self.model.model(coords)
             u_pred = uvp_pred[:, 0:1]
             v_pred = uvp_pred[:, 1:2]
@@ -47,20 +54,16 @@ class NavierStokesLoss:
 
             # Compute boundary losses for each condition
             uBc_loss, vBc_loss, pBc_loss = self.computeBoundaryLoss(self.model.model, xBc, yBc, uBc_tensor, vBc_tensor, pBc_tensor)
-            total_loss = physicsLoss + uBc_loss + vBc_loss + pBc_loss
+            
+            self.loss = physicsLoss + uBc_loss + vBc_loss + pBc_loss
 
-        return total_loss
-
-        
+        return
+    
     def convert_and_reshape(self, tensor, dtype=tf.float32, shape=(-1, 1)):
                         if tensor is not None:
                             return tf.reshape(tf.convert_to_tensor(tensor, dtype=dtype), shape)
                         return None
-    
-    def getBoundaryCondition(self, N0, x_min, x_max, y_min, y_max, sampling_method='uniform'):
-        raise NotImplementedError("Boundary condition method must be implemented in a subclass.")
-    
-    
+       
     def imposeBoundaryCondition(self, uBc, vBc, pBc):
         def convert_if_not_none(tensor):
             return tf.convert_to_tensor(tensor, dtype=tf.float32) if tensor is not None else None
@@ -70,7 +73,6 @@ class NavierStokesLoss:
         pBc = convert_if_not_none(pBc)
 
         return uBc, vBc, pBc
-
     
     def computeBoundaryLoss(self, model, xBc, yBc, uBc, vBc, pBc):
         def compute_loss(bc, idx):
