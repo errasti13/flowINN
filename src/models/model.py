@@ -8,6 +8,8 @@ class PINN:
         self.model.summary()
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.learning_rate_schedule(learning_rate))
 
+        self.eq = eq
+
 
     def create_model(self, input_shape,  output_shape, layers, activation):
         model = tf.keras.Sequential()
