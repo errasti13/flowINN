@@ -14,10 +14,10 @@ class NavierStokesLoss:
         self.loss = None
 
     def loss_function(self):
-         if self.mesh.is2D == True:
-              self.loss_function2D()
-
-         return
+        if self.mesh.is2D:
+            return self.loss_function2D()
+        else:
+            raise NotImplementedError("Only 2D loss functions are implemented for now.")
 
     def loss_function2D(self):
         X = tf.convert_to_tensor(self.mesh.X, dtype=tf.float32)
@@ -27,7 +27,7 @@ class NavierStokesLoss:
         Y = tf.reshape(Y, [-1, 1])
 
         with tf.GradientTape(persistent=True) as tape:
-            coords  = tf.concat([X, Y], axis=1)
+            coords = tf.concat([X, Y], axis=1)
             uvp_pred = self.model.model(coords)
             u_pred = uvp_pred[:, 0:1]
             v_pred = uvp_pred[:, 1:2]
@@ -38,7 +38,7 @@ class NavierStokesLoss:
             momentum_x_loss = tf.reduce_mean(tf.square(physics_residuals['momentum_x']))
             momentum_y_loss = tf.reduce_mean(tf.square(physics_residuals['momentum_y']))
 
-        physicsLoss = continuity_loss + momentum_x_loss + momentum_y_loss
+        totalLoss = continuity_loss + momentum_x_loss + momentum_y_loss
 
         # Compute boundary condition losses
         for boundary_key, boundary_data in self.mesh.boundaries.items():
@@ -55,9 +55,10 @@ class NavierStokesLoss:
             # Compute boundary losses for each condition
             uBc_loss, vBc_loss, pBc_loss = self.computeBoundaryLoss(self.model.model, xBc, yBc, uBc_tensor, vBc_tensor, pBc_tensor)
             
-            self.loss = physicsLoss + uBc_loss + vBc_loss + pBc_loss
+            totalLoss += uBc_loss + vBc_loss + pBc_loss
 
-        return
+        return totalLoss
+
     
     def convert_and_reshape(self, tensor, dtype=tf.float32, shape=(-1, 1)):
                         if tensor is not None:
