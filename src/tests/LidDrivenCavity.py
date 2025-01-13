@@ -1,5 +1,4 @@
 import numpy as np
-import tensorflow as tf
 
 from src.mesh.mesh import Mesh
 from src.models.model import PINN
