@@ -83,6 +83,7 @@ models/*.pkl
 wandb/
 results/
 logs/
+trainedModels/
 *.log
 
 # Model files and data
