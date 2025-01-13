@@ -3,14 +3,11 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import ScalarFormatter
 
 class PINN:
-    def __init__(self, input_shape=2, output_shape=1, layers=[20, 20, 20], activation='tanh', learning_rate=0.01, eq = 'Heat'):
+    def __init__(self, input_shape=2, output_shape=1, layers=[20, 20, 20], activation='tanh', learning_rate=0.01, eq = 'LidDrivenCavity'):
         self.model = self.create_model(input_shape, output_shape, layers, activation)
         self.model.summary()
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.learning_rate_schedule(learning_rate))
-        self.loss = None
 
-        self.eq = eq
-        
 
     def create_model(self, input_shape,  output_shape, layers, activation):
         model = tf.keras.Sequential()
@@ -28,14 +25,14 @@ class PINN:
         )
 
     @tf.function
-    def train_step(self, loss_function, data):
+    def train_step(self, loss_function):
         with tf.GradientTape() as tape:
-            loss = loss_function(self.model, data)
+            loss = loss_function()  # Call the loss function here to compute the loss
         gradients = tape.gradient(loss, self.model.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
-        return loss  
+        return loss
 
-    def train(self, loss_function, data, epochs=50000, print_interval=100, autosave_interval = 10000):
+    def train(self, loss_function, epochs=50000, print_interval=100, autosave_interval = 10000):
         loss_history = []
         epoch_history = []
 
@@ -54,7 +51,7 @@ class PINN:
         plt.legend()
 
         for epoch in range(epochs):
-            loss = self.train_step(loss_function, data)
+            loss = self.train_step(loss_function)
 
             if (epoch + 1) % print_interval == 0:
                 loss_history.append(loss.numpy())
