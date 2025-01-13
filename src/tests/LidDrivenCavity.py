@@ -7,12 +7,12 @@ from src.training.loss import NavierStokesLoss
 
 class LidDrivenCavity():
     
-    def __init__(self, xRange, yRange):
+    def __init__(self, caseName, xRange, yRange):
         self.is2D = False
 
-        self.problemTag = "LidDrivenCavity"
+        self.problemTag = caseName
         self.mesh  = Mesh(self.is2D)
-        self.model = PINN(input_shape=2, output_shape=3)
+        self.model = PINN(input_shape=2, output_shape=3, eq = self.problemTag)
 
         self.loss = None
         
@@ -69,14 +69,11 @@ class LidDrivenCavity():
                     np.full((NBoundary,), self.xRange[1], dtype=np.float32),
                     np.linspace(self.yRange[0], self.yRange[1], NBoundary),
                     np.zeros(NBoundary), np.zeros(NBoundary))
-        
-        self.getLossFunction()
-
         return
     
     def getLossFunction(self):
         self.loss = NavierStokesLoss(self.mesh, self.model)
-        self.loss.loss_function()
     
-    def train(self):
-        self.model.train(self.loss.loss, )
+    def train(self, epochs=10000, print_interval=100,  autosaveInterval=10000):
+        self.getLossFunction()
+        self.model.train(self.loss.loss_function, epochs=epochs, print_interval=print_interval,autosave_interval=autosaveInterval)

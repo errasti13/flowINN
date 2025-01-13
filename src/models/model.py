@@ -32,7 +32,7 @@ class PINN:
         self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
         return loss
 
-    def train(self, loss_function, epochs=50000, print_interval=100, autosave_interval = 10000):
+    def train(self, loss_function, epochs, print_interval, autosave_interval):
         loss_history = []
         epoch_history = []
 
