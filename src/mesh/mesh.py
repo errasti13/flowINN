@@ -5,6 +5,8 @@ class Mesh:
         self.X = None
         self.Y = None
         self.Z = None
+
+        self.solutions = {}
         self.is2D = is2D  # Default is 2D until explicitly set to 3D during mesh generation
 
         self.boundaries = {}
