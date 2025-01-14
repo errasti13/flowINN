@@ -6,9 +6,9 @@ def main():
 
     equation = LidDrivenCavity('LidDrivenCavity', x_range, y_range)
     
-    equation.generateMesh(Nx = 200, Ny = 200)
+    equation.generateMesh(Nx = 300, Ny = 300)
 
-    equation.train(epochs=1000)
+    equation.train(epochs=100000)
 
     equation.predict()
     equation.plot()
