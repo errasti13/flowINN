@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.pyplot as plt
 
 from src.mesh.mesh import Mesh
 from src.models.model import PINN
@@ -52,22 +53,22 @@ class LidDrivenCavity():
         setBoundary('top',
                     np.linspace(self.xRange[0], self.xRange[1], NBoundary),
                     np.full((NBoundary,), self.yRange[1], dtype=np.float32),
-                    np.ones(NBoundary))
+                    u_values=np.ones(NBoundary))
 
         setBoundary('bottom',
                     np.linspace(self.xRange[0], self.xRange[1], NBoundary),
                     np.full((NBoundary,), self.yRange[0], dtype=np.float32),
-                    np.zeros(NBoundary), np.zeros(NBoundary))
+                    u_values = np.zeros(NBoundary), v_values = np.zeros(NBoundary))
 
         setBoundary('left',
                     np.full((NBoundary,), self.xRange[0], dtype=np.float32),
                     np.linspace(self.yRange[0], self.yRange[1], NBoundary),
-                    np.zeros(NBoundary), np.zeros(NBoundary))
+                    u_values = np.zeros(NBoundary), v_values = np.zeros(NBoundary))
 
         setBoundary('right',
                     np.full((NBoundary,), self.xRange[1], dtype=np.float32),
                     np.linspace(self.yRange[0], self.yRange[1], NBoundary),
-                    np.zeros(NBoundary), np.zeros(NBoundary))
+                    u_values = np.zeros(NBoundary), v_values = np.zeros(NBoundary))
         return
     
     def getLossFunction(self):
@@ -76,3 +77,28 @@ class LidDrivenCavity():
     def train(self, epochs=10000, print_interval=100,  autosaveInterval=10000):
         self.getLossFunction()
         self.model.train(self.loss.loss_function, epochs=epochs, print_interval=print_interval,autosave_interval=autosaveInterval)
+
+    def predict(self):
+        X = (np.hstack((self.mesh.X.flatten()[:, None], self.mesh.Y.flatten()[:, None])))
+        sol = self.model.predict(X)
+
+        self.mesh.solutions['u'] = sol[:, 0]
+        self.mesh.solutions['v'] = sol[:, 1]
+        self.mesh.solutions['p'] = sol[:, 2]
+
+        return
+
+    def plot(self):
+        plt.figure()
+        plt.scatter(self.mesh.X.flatten(), self.mesh.Y.flatten(), 
+                    c=self.mesh.solutions['u'], 
+                    cmap='viridis')  # Add a colormap
+        plt.colorbar()  # Add a colorbar to show the scale
+        plt.show()
+
+        plt.figure()
+        plt.scatter(self.mesh.X.flatten(), self.mesh.Y.flatten(), 
+                    c=self.mesh.solutions['v'], 
+                    cmap='viridis')  # Add a colormap
+        plt.colorbar()  # Add a colorbar to show the scale
+        plt.show()
