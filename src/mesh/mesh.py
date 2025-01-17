@@ -44,16 +44,15 @@ class Mesh:
         if sampling_method == 'random':
             self.X = (np.random.rand(nPoints) * (x_max - x_min) + x_min).astype(np.float32)
             self.Y = (np.random.rand(nPoints) * (y_max - y_min) + y_min).astype(np.float32)
-
-            # For 3D, generate Z points
+            
             if Nz > 1:
                 self.Z = (np.random.rand(nPoints) * (z_max - z_min) + z_min).astype(np.float32)
 
         elif sampling_method == 'uniform':
-            self.X = np.linspace(x_min, x_max, nPoints, dtype=np.float32)
-            self.Y = np.linspace(y_min, y_max, nPoints, dtype=np.float32)
+            self.X = np.linspace(x_min, x_max, nPoints)[:, None].astype(np.float32)
+            self.Y = np.linspace(y_min, y_max, nPoints)[:, None].astype(np.float32)
             if not self.is2D:
-                self.Z = np.linspace(z_min, z_max, nPoints, dtype=np.float32)
+                self.Z = np.linspace(z_min, z_max, nPoints)[:, None].astype(np.float32)
 
         else:
             raise ValueError(f"Unsupported sampling method: {sampling_method}")
