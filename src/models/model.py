@@ -77,3 +77,6 @@ class PINN:
 
     def predict(self, X):
         return self.model.predict(X)
+    
+    def load(self, filepath):
+        self.model = tf.keras.models.load_model(filepath)
