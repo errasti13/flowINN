@@ -13,6 +13,8 @@ class NavierStokesLoss:
 
         self.loss = None
 
+        self.nu = 0.01
+
     def loss_function(self):
         if self.mesh.is2D:
             return self.loss_function2D()
@@ -20,25 +22,43 @@ class NavierStokesLoss:
             raise NotImplementedError("Only 2D loss functions are implemented for now.")
 
     def loss_function2D(self):
-        X = tf.convert_to_tensor(self.mesh.X, dtype=tf.float32)
-        Y = tf.convert_to_tensor(self.mesh.Y, dtype=tf.float32)
+        X = tf.reshape(tf.convert_to_tensor(self.mesh.X, dtype=tf.float32), [-1, 1])
+        Y = tf.reshape(tf.convert_to_tensor(self.mesh.Y, dtype=tf.float32), [-1, 1])
 
-        X = tf.reshape(X, [-1, 1])
-        Y = tf.reshape(Y, [-1, 1])
+        total_loss = 0
 
+        with tf.GradientTape(persistent=True) as tape:
+            tape.watch([X, Y])
 
-        with tf.GradientTape(persistent=True) as tape: 
+            # Compute predictions
             uvp_pred = self.model.model(tf.concat([X, Y], axis=1))
             u_pred = uvp_pred[:, 0]
             v_pred = uvp_pred[:, 1]
             p_pred = uvp_pred[:, 2]
 
-            physics_residuals = self.physicsLoss.get_residuals(u_pred, v_pred, p_pred, X, Y)
-            continuity_loss = tf.reduce_mean(tf.square(physics_residuals['continuity']))
-            momentum_x_loss = tf.reduce_mean(tf.square(physics_residuals['momentum_x']))
-            momentum_y_loss = tf.reduce_mean(tf.square(physics_residuals['momentum_y']))
+            # Compute first derivatives
+            u_x = tape.gradient(u_pred, X)
+            u_y = tape.gradient(u_pred, Y)
+            v_x = tape.gradient(v_pred, X)
+            v_y = tape.gradient(v_pred, Y)
+            p_x = tape.gradient(p_pred, X)
+            p_y = tape.gradient(p_pred, Y)
 
-        totalLoss = continuity_loss + momentum_x_loss + momentum_y_loss
+        # Compute second derivatives manually
+        u_xx = tf.gradients(u_x, X)[0]
+        u_yy = tf.gradients(u_y, Y)[0]
+        v_xx = tf.gradients(v_x, X)[0]
+        v_yy = tf.gradients(v_y, Y)[0]
+
+        continuity = u_x + v_y
+        momentum_u = u_pred * u_x + v_pred * u_y + p_x - self.nu * (u_xx + u_yy)
+        momentum_v = u_pred * v_x + v_pred * v_y + p_y - self.nu * (v_xx + v_yy)
+
+        f_loss_u = tf.reduce_mean(tf.square(momentum_u))
+        f_loss_v = tf.reduce_mean(tf.square(momentum_v))
+        continuity_loss = tf.reduce_mean(tf.square(continuity))
+
+        total_loss += f_loss_u + f_loss_v + continuity_loss
 
         # Compute boundary condition losses
         for boundary_key, boundary_data in self.mesh.boundaries.items():
@@ -55,9 +75,10 @@ class NavierStokesLoss:
             # Compute boundary losses for each condition
             uBc_loss, vBc_loss, pBc_loss = self.computeBoundaryLoss(self.model.model, xBc, yBc, uBc_tensor, vBc_tensor, pBc_tensor)
             
-            totalLoss += uBc_loss + vBc_loss + pBc_loss
+            total_loss += uBc_loss + vBc_loss + pBc_loss
 
-        return totalLoss
+        return total_loss
+
 
     
     def convert_and_reshape(self, tensor, dtype=tf.float32, shape=(-1, 1)):
