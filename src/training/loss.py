@@ -23,6 +23,10 @@ class NavierStokesLoss:
         X = tf.convert_to_tensor(self.mesh.X, dtype=tf.float32)
         Y = tf.convert_to_tensor(self.mesh.Y, dtype=tf.float32)
 
+        X = tf.reshape(X, [-1, 1])
+        Y = tf.reshape(Y, [-1, 1])
+
+
         with tf.GradientTape(persistent=True) as tape: 
             uvp_pred = self.model.model(tf.concat([X, Y], axis=1))
             u_pred = uvp_pred[:, 0]
