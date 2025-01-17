@@ -2,10 +2,8 @@ import tensorflow as tf
 
 
 class NavierStokes3D:
-    def __init__(self, rho=1.0, mu=0.01):
-        self.rho = rho    # density
-        self.mu = mu      # dynamic viscosity
-        self.nu = mu/rho  # kinematic viscosity
+    def __init__(self, nu = 0.01):
+        self.nu = nu      # dynamic viscosity
 
     def continuity(self, u, v, w, x, y, z):
         """Continuity equation: ∇·u = 0"""
@@ -76,20 +74,13 @@ class NavierStokes3D:
     
 
 class NavierStokes2D:
-    def __init__(self, rho=1.0, mu=0.01):
-        self.rho = rho    # density
-        self.mu = mu      # dynamic viscosity
-        self.nu = mu/rho  # kinematic viscosity
+    def __init__(self, nu = 0.01):
+        self.nu = nu  # kinematic viscosity
 
     def continuity(self, u, v, x, y):
         """Continuity equation: ∇·u = 0"""
         with tf.GradientTape(persistent=True) as tape:
             tape.watch([x, y])
-            # Reshape inputs to ensure proper broadcasting
-            u = tf.reshape(u, [-1])
-            v = tf.reshape(v, [-1])
-            x = tf.reshape(x, [-1])
-            y = tf.reshape(y, [-1])
             
             du_dx = tape.gradient(u, x)
             dv_dy = tape.gradient(v, y)
@@ -131,9 +122,9 @@ class NavierStokes2D:
             du_dxx = tf.zeros_like(x) if du_dxx is None else du_dxx
             du_dyy = tf.zeros_like(y) if du_dyy is None else du_dyy
         
-        convection = self.rho * (u * du_dx + v * du_dy)
+        convection = (u * du_dx + v * du_dy)
         pressure = dp_dx
-        diffusion = self.mu * (du_dxx + du_dyy)
+        diffusion = self.nu * (du_dxx + du_dyy)
         
         return convection + pressure - diffusion
 
@@ -168,9 +159,9 @@ class NavierStokes2D:
             dv_dxx = tf.zeros_like(x) if dv_dxx is None else dv_dxx
             dv_dyy = tf.zeros_like(y) if dv_dyy is None else dv_dyy
         
-        convection = self.rho * (u * dv_dx + v * dv_dy)
+        convection = (u * dv_dx + v * dv_dy)
         pressure = dp_dy
-        diffusion = self.mu * (dv_dxx + dv_dyy)
+        diffusion = self.nu * (dv_dxx + dv_dyy)
         
         return convection + pressure - diffusion
 
