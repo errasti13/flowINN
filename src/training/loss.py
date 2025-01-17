@@ -23,15 +23,11 @@ class NavierStokesLoss:
         X = tf.convert_to_tensor(self.mesh.X, dtype=tf.float32)
         Y = tf.convert_to_tensor(self.mesh.Y, dtype=tf.float32)
 
-        X = tf.reshape(X, [-1, 1])
-        Y = tf.reshape(Y, [-1, 1])
-
-        with tf.GradientTape(persistent=True) as tape:
-            coords = tf.concat([X, Y], axis=1)
-            uvp_pred = self.model.model(coords)
-            u_pred = uvp_pred[:, 0:1]
-            v_pred = uvp_pred[:, 1:2]
-            p_pred = uvp_pred[:, 2:3]
+        with tf.GradientTape(persistent=True) as tape: 
+            uvp_pred = self.model.model(tf.concat([X, Y], axis=1))
+            u_pred = uvp_pred[:, 0]
+            v_pred = uvp_pred[:, 1]
+            p_pred = uvp_pred[:, 2]
 
             physics_residuals = self.physicsLoss.get_residuals(u_pred, v_pred, p_pred, X, Y)
             continuity_loss = tf.reduce_mean(tf.square(physics_residuals['continuity']))
