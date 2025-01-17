@@ -12,7 +12,7 @@ class LidDrivenCavity():
 
         self.problemTag = caseName
         self.mesh  = Mesh(self.is2D)
-        self.model = PINN(input_shape=2, output_shape=3, eq = self.problemTag, layers=[20,40,40,40,20])
+        self.model = PINN(input_shape=2, output_shape=3, eq = self.problemTag, layers=[20,40,60,40,20])
 
         self.loss = None
         
@@ -21,7 +21,7 @@ class LidDrivenCavity():
 
         return
     
-    def generateMesh(self, Nx=200, Ny=200, sampling_method='random'):
+    def generateMesh(self, Nx=200, Ny=200, NBoundary=100, sampling_method='random'):
         # Generate the mesh
         self.mesh.generateMesh(
             x_range=self.xRange,
@@ -47,9 +47,7 @@ class LidDrivenCavity():
             if p_values is not None:
                 self.mesh.setBoundaryCodition(x_values, y_values, p_values, 'p', boundary_name)
             return
-
-        # Define boundary data
-        NBoundary = 100
+        
         setBoundary('top',
                     np.linspace(self.xRange[0], self.xRange[1], NBoundary),
                     np.full((NBoundary,), self.yRange[1], dtype=np.float32),
@@ -92,7 +90,7 @@ class LidDrivenCavity():
         plt.figure()
         plt.scatter(self.mesh.X.flatten(), self.mesh.Y.flatten(), 
                     c=self.mesh.solutions['u'], 
-                    cmap='viridis')  # Add a colormap
+                    cmap='viridis', s=0.1)  # Add a colormap
         plt.colorbar()  # Add a colorbar to show the scale
         plt.show()
 
