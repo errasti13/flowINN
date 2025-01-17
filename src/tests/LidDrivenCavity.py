@@ -50,21 +50,21 @@ class LidDrivenCavity():
         
         setBoundary('top',
                     np.linspace(self.xRange[0], self.xRange[1], NBoundary),
-                    np.full((NBoundary,), self.yRange[1], dtype=np.float32),
+                    np.full((NBoundary, 1), self.yRange[1], dtype=np.float32),
                     u_values=np.ones(NBoundary))
 
         setBoundary('bottom',
                     np.linspace(self.xRange[0], self.xRange[1], NBoundary),
-                    np.full((NBoundary,), self.yRange[0], dtype=np.float32),
+                    np.full((NBoundary, 1), self.yRange[0], dtype=np.float32),
                     u_values = np.zeros(NBoundary), v_values = np.zeros(NBoundary))
 
         setBoundary('left',
-                    np.full((NBoundary,), self.xRange[0], dtype=np.float32),
+                    np.full((NBoundary, 1), self.xRange[0], dtype=np.float32),
                     np.linspace(self.yRange[0], self.yRange[1], NBoundary),
                     u_values = np.zeros(NBoundary), v_values = np.zeros(NBoundary))
 
         setBoundary('right',
-                    np.full((NBoundary,), self.xRange[1], dtype=np.float32),
+                    np.full((NBoundary, 1), self.xRange[1], dtype=np.float32),
                     np.linspace(self.yRange[0], self.yRange[1], NBoundary),
                     u_values = np.zeros(NBoundary), v_values = np.zeros(NBoundary))
         return
