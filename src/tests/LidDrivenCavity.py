@@ -38,35 +38,26 @@ class LidDrivenCavity():
             'bottom': {'x': None, 'y': None, 'u': None, 'v': None, 'p': None},
             'top': {'x': None, 'y': None, 'u': None, 'v': None, 'p': None}
         }
-
-        def setBoundary(boundary_name, x_values, y_values, u_values=None, v_values=None, p_values=None):
-            if u_values is not None:
-                self.mesh.setBoundaryCodition(x_values, y_values, u_values, 'u', boundary_name)
-            if v_values is not None:
-                self.mesh.setBoundaryCodition(x_values, y_values, v_values, 'v', boundary_name)
-            if p_values is not None:
-                self.mesh.setBoundaryCodition(x_values, y_values, p_values, 'p', boundary_name)
-            return
         
-        setBoundary('top',
+        self.mesh.setBoundary('top',
                     np.linspace(self.xRange[0], self.xRange[1], NBoundary),
                     np.full((NBoundary, 1), self.yRange[1], dtype=np.float32),
-                    u_values=np.ones(NBoundary))
+                    u = np.ones(NBoundary))
 
-        setBoundary('bottom',
+        self.mesh.setBoundary('bottom',
                     np.linspace(self.xRange[0], self.xRange[1], NBoundary),
                     np.full((NBoundary, 1), self.yRange[0], dtype=np.float32),
-                    u_values = np.zeros(NBoundary), v_values = np.zeros(NBoundary))
+                    u = np.zeros(NBoundary), v = np.zeros(NBoundary))
 
-        setBoundary('left',
+        self.mesh.setBoundary('left',
                     np.full((NBoundary, 1), self.xRange[0], dtype=np.float32),
                     np.linspace(self.yRange[0], self.yRange[1], NBoundary),
-                    u_values = np.zeros(NBoundary), v_values = np.zeros(NBoundary))
+                    u = np.zeros(NBoundary), v = np.zeros(NBoundary))
 
-        setBoundary('right',
+        self.mesh.setBoundary('right',
                     np.full((NBoundary, 1), self.xRange[1], dtype=np.float32),
                     np.linspace(self.yRange[0], self.yRange[1], NBoundary),
-                    u_values = np.zeros(NBoundary), v_values = np.zeros(NBoundary))
+                    u = np.zeros(NBoundary), v = np.zeros(NBoundary))
         return
     
     def getLossFunction(self):

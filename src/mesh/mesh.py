@@ -59,7 +59,16 @@ class Mesh:
         
         return 
     
+    def setBoundary(self, boundary_name, xBc, yBc, **boundary_conditions):
+        # Set x and y coordinates for the boundary
+        self.boundaries[boundary_name]['x'] = xBc
+        self.boundaries[boundary_name]['y'] = yBc
 
+        # Iterate over all specified boundary conditions
+        for var_name, values in boundary_conditions.items():
+            if values is not None:
+                self.setBoundaryCodition(xBc, yBc, values, var_name, boundary_name)
+    
     def setBoundaryCodition(self, xCoord, yCoord, value, varName, boundaryName, zCoord = None):
         if boundaryName not in self.boundaries:
             raise ValueError(f"Boundary name '{boundaryName}' is not valid. Available boundaries are: {list(self.boundaries.keys())}")
