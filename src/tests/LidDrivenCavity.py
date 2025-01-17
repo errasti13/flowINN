@@ -86,17 +86,27 @@ class LidDrivenCavity():
 
         return
 
-    def plot(self):
-        plt.figure()
-        plt.scatter(self.mesh.X.flatten(), self.mesh.Y.flatten(), 
-                    c=self.mesh.solutions['u'], 
-                    cmap='viridis', s=0.1)  # Add a colormap
-        plt.colorbar()  # Add a colorbar to show the scale
+    def plot(self, solkey='u'):
+        from scipy.interpolate import griddata
+        # Assuming self.mesh.solutions['sol'] is of size (5000,)
+        x = self.mesh.X
+        y = self.mesh.Y
+        sol = self.mesh.solutions[solkey]
+
+        grid_x, grid_y = np.meshgrid(np.linspace(x.min(), x.max(), 100), np.linspace(y.min(), y.max(), 100))
+
+        # Interpolate the scattered data to the grid using griddata
+        grid_sol = griddata((x, y), sol, (grid_x, grid_y), method='cubic')
+
+        # Plot the result using contourf
+        plt.figure(figsize=(8, 6))
+        plt.title(f'Solution Field {solkey}')
+        cp = plt.contourf(grid_x, grid_y, grid_sol, cmap='jet', levels=50)
+        plt.colorbar(cp)
+        plt.xlabel('X')
+        plt.ylabel('Y')
+        plt.axis('equal')
+        plt.tight_layout()
         plt.show()
 
-        plt.figure()
-        plt.scatter(self.mesh.X.flatten(), self.mesh.Y.flatten(), 
-                    c=self.mesh.solutions['v'], 
-                    cmap='viridis')  # Add a colormap
-        plt.colorbar()  # Add a colorbar to show the scale
-        plt.show()
+
