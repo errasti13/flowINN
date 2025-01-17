@@ -36,23 +36,7 @@ class NavierStokesLoss:
             v_pred = uvp_pred[:, 1]
             p_pred = uvp_pred[:, 2]
 
-            # Compute first derivatives
-            u_x = tape.gradient(u_pred, X)
-            u_y = tape.gradient(u_pred, Y)
-            v_x = tape.gradient(v_pred, X)
-            v_y = tape.gradient(v_pred, Y)
-            p_x = tape.gradient(p_pred, X)
-            p_y = tape.gradient(p_pred, Y)
-
-        # Compute second derivatives manually
-        u_xx = tf.gradients(u_x, X)[0]
-        u_yy = tf.gradients(u_y, Y)[0]
-        v_xx = tf.gradients(v_x, X)[0]
-        v_yy = tf.gradients(v_y, Y)[0]
-
-        continuity = u_x + v_y
-        momentum_u = u_pred * u_x + v_pred * u_y + p_x - self.nu * (u_xx + u_yy)
-        momentum_v = u_pred * v_x + v_pred * v_y + p_y - self.nu * (v_xx + v_yy)
+            continuity, momentum_u, momentum_v = self.physicsLoss.get_residuals(u_pred, v_pred, p_pred, X, Y, tape)
 
         f_loss_u = tf.reduce_mean(tf.square(momentum_u))
         f_loss_v = tf.reduce_mean(tf.square(momentum_v))
@@ -79,8 +63,6 @@ class NavierStokesLoss:
 
         return total_loss
 
-
-    
     def convert_and_reshape(self, tensor, dtype=tf.float32, shape=(-1, 1)):
                         if tensor is not None:
                             return tf.reshape(tf.convert_to_tensor(tensor, dtype=dtype), shape)

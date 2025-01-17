@@ -77,98 +77,28 @@ class NavierStokes2D:
     def __init__(self, nu = 0.01):
         self.nu = nu  # kinematic viscosity
 
-    def continuity(self, u, v, x, y):
-        """Continuity equation: ∇·u = 0"""
-        with tf.GradientTape(persistent=True) as tape:
-            tape.watch([x, y])
-            
-            du_dx = tape.gradient(u, x)
-            dv_dy = tape.gradient(v, y)
-            
-        # Convert None gradients to zeros
-        du_dx = tf.zeros_like(x) if du_dx is None else du_dx
-        dv_dy = tf.zeros_like(y) if dv_dy is None else dv_dy
-        
-        return du_dx + dv_dy
-
-    def momentum_x(self, u, v, p, x, y):
-        """X-momentum equation"""
-        with tf.GradientTape(persistent=True) as tape2:
-            tape2.watch([x, y])
-            # Reshape inputs
-            u = tf.reshape(u, [-1])
-            v = tf.reshape(v, [-1])
-            p = tf.reshape(p, [-1])
-            x = tf.reshape(x, [-1])
-            y = tf.reshape(y, [-1])
-            
-            # First derivatives
-            du_dx = tape2.gradient(u, x)
-            du_dy = tape2.gradient(u, y)
-            dp_dx = tape2.gradient(p, x)
-            
-            # Handle None gradients
-            du_dx = tf.zeros_like(x) if du_dx is None else du_dx
-            du_dy = tf.zeros_like(y) if du_dy is None else du_dy
-            dp_dx = tf.zeros_like(x) if dp_dx is None else dp_dx
-            
-        # Second derivatives using another tape
-        with tf.GradientTape(persistent=True) as tape3:
-            tape3.watch([x, y])
-            du_dxx = tape3.gradient(du_dx, x)
-            du_dyy = tape3.gradient(du_dy, y)
-            
-            # Handle None gradients
-            du_dxx = tf.zeros_like(x) if du_dxx is None else du_dxx
-            du_dyy = tf.zeros_like(y) if du_dyy is None else du_dyy
-        
-        convection = (u * du_dx + v * du_dy)
-        pressure = dp_dx
-        diffusion = self.nu * (du_dxx + du_dyy)
-        
-        return convection + pressure - diffusion
-
-    def momentum_y(self, u, v, p, x, y):
-        """Y-momentum equation"""
-        with tf.GradientTape(persistent=True) as tape2:
-            tape2.watch([x, y])
-            # Reshape inputs
-            u = tf.reshape(u, [-1])
-            v = tf.reshape(v, [-1])
-            p = tf.reshape(p, [-1])
-            x = tf.reshape(x, [-1])
-            y = tf.reshape(y, [-1])
-            
-            # First derivatives
-            dv_dx = tape2.gradient(v, x)
-            dv_dy = tape2.gradient(v, y)
-            dp_dy = tape2.gradient(p, y)
-            
-            # Handle None gradients
-            dv_dx = tf.zeros_like(x) if dv_dx is None else dv_dx
-            dv_dy = tf.zeros_like(y) if dv_dy is None else dv_dy
-            dp_dy = tf.zeros_like(y) if dp_dy is None else dp_dy
-            
-        # Second derivatives using another tape
-        with tf.GradientTape(persistent=True) as tape3:
-            tape3.watch([x, y])
-            dv_dxx = tape3.gradient(dv_dx, x)
-            dv_dyy = tape3.gradient(dv_dy, y)
-            
-            # Handle None gradients
-            dv_dxx = tf.zeros_like(x) if dv_dxx is None else dv_dxx
-            dv_dyy = tf.zeros_like(y) if dv_dyy is None else dv_dyy
-        
-        convection = (u * dv_dx + v * dv_dy)
-        pressure = dp_dy
-        diffusion = self.nu * (dv_dxx + dv_dyy)
-        
-        return convection + pressure - diffusion
-
-    def get_residuals(self, u, v, p, x, y):
+    def get_residuals(self, u, v, p, x, y, tape):
         """Calculate all NS residuals"""
-        return {
-            'continuity': self.continuity(u, v, x, y),
-            'momentum_x': self.momentum_x(u, v, p, x, y),
-            'momentum_y': self.momentum_y(u, v, p, x, y),
-        }
+
+        tape.watch([x, y])
+        u_x = tape.gradient(u, x)
+        u_y = tape.gradient(u, y)
+        v_x = tape.gradient(v, x)
+        v_y = tape.gradient(v, y)
+        p_x = tape.gradient(p, x)
+        p_y = tape.gradient(p, y)
+
+        # Compute second derivatives (second order)
+        u_xx = tape.gradient(u_x, x)
+        u_yy = tape.gradient(u_y, y)
+        v_xx = tape.gradient(v_x, x)
+        v_yy = tape.gradient(v_y, y)
+
+        # Continuity equation
+        continuity = u_x + v_y
+
+        # Momentum equations
+        momentum_u = u * u_x + v * u_y + p_x - self.nu * (u_xx + u_yy)
+        momentum_v = u * v_x + v * v_y + p_y - self.nu * (v_xx + v_yy)
+
+        return continuity, momentum_u, momentum_v
