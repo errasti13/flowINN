@@ -79,4 +79,15 @@ class PINN:
         return self.model.predict(X)
     
     def load(self, filepath):
-        self.model = tf.keras.models.load_model(filepath)
+        import os
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(f"The specified file does not exist: {filepath}")
+        
+        try:
+            loaded_model = tf.keras.models.load_model(filepath)
+            if not isinstance(loaded_model, tf.keras.Model):
+                raise ValueError(f"The loaded object is not a valid TensorFlow/Keras model: {filepath}")
+            self.model = loaded_model
+            print(f"Model successfully loaded from {filepath}")
+        except Exception as e:
+            raise RuntimeError(f"An error occurred while loading the model from {filepath}: {e}")
