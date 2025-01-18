@@ -1,9 +1,10 @@
 import numpy as np
-import matplotlib.pyplot as plt
 
 from src.mesh.mesh import Mesh
 from src.models.model import PINN
 from src.training.loss import NavierStokesLoss
+from src.plot.plot import Plot
+from src.plot.postprocess import Postprocess
 
 class LidDrivenCavity():
     
@@ -15,6 +16,7 @@ class LidDrivenCavity():
         self.model = PINN(input_shape=2, output_shape=3, eq = self.problemTag, layers=[20,40,60,40,20])
 
         self.loss = None
+        self.Plot = None
         
         self.xRange = xRange
         self.yRange = yRange
@@ -76,28 +78,14 @@ class LidDrivenCavity():
         self.mesh.solutions['p'] = sol[:, 2]
 
         return
+    
+    def generate_plots(self):
+        self.Plot = Plot(self.mesh)
+        self.Post = Postprocess(self.Plot)
 
-    def plot(self, solkey='u'):
-        from scipy.interpolate import griddata
-        # Assuming self.mesh.solutions['sol'] is of size (5000,)
-        x = self.mesh.X
-        y = self.mesh.Y
-        sol = self.mesh.solutions[solkey]
+    def plot(self, solkey = 'u'):
+        self.generate_plots()
+        self.Plot.plot(solkey)
 
-        grid_x, grid_y = np.meshgrid(np.linspace(x.min(), x.max(), 100), np.linspace(y.min(), y.max(), 100))
-
-        # Interpolate the scattered data to the grid using griddata
-        grid_sol = griddata((x, y), sol, (grid_x, grid_y), method='cubic')
-
-        # Plot the result using contourf
-        plt.figure(figsize=(8, 6))
-        plt.title(f'Solution Field {solkey}')
-        cp = plt.contourf(grid_x, grid_y, grid_sol, cmap='jet', levels=50)
-        plt.colorbar(cp)
-        plt.xlabel('X')
-        plt.ylabel('Y')
-        plt.axis('equal')
-        plt.tight_layout()
-        plt.show()
 
 

@@ -1,6 +1,8 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
+from src.plot.postprocess import Postprocess
+
 class Plot:
 
     def __init__(self, mesh):
@@ -14,7 +16,13 @@ class Plot:
 
     def plot(self, solkey):
         from scipy.interpolate import griddata
-        # Assuming self.mesh.solutions['sol'] is of size (5000,)
+
+        if solkey not in self.solutions:
+            raise KeyError(
+                f"The solution key '{solkey}' was not found in the available solutions. "
+                f"Available keys are: {list(self.solutions.keys())}."
+            )
+
         x = self.X
         y = self.Y
         sol = self.solutions[solkey]
