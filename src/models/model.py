@@ -87,10 +87,7 @@ class PINN:
             raise FileNotFoundError(f"The specified file does not exist: {filepath}")
         
         try:
-            loaded_model = tf.keras.models.load_model(filepath)
-            if not isinstance(loaded_model, tf.keras.Model):
-                raise ValueError(f"The loaded object is not a valid TensorFlow/Keras model: {filepath}")
-            self.model = loaded_model
+            self.model = tf.keras.models.load_model(filepath)
             print(f"Model successfully loaded from {filepath}")
         except Exception as e:
-            raise RuntimeError(f"An error occurred while loading the model from {filepath}: {e}")
+            raise RuntimeError(f"Error loading model from {filepath}: {e}")
