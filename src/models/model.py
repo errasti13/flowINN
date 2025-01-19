@@ -78,8 +78,11 @@ class PINN:
     def predict(self, X):
         return self.model.predict(X)
     
-    def load(self, filepath):
+    def load(self, model_name):
         import os
+        
+        filepath = f'trainedModels/{model_name}.tf'
+
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"The specified file does not exist: {filepath}")
         
