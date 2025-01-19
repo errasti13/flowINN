@@ -14,7 +14,7 @@ class Plot:
 
         self.solutions = mesh.solutions
 
-    def plot(self, solkey):
+    def plot(self, solkey, streamlines):
         from scipy.interpolate import griddata
 
         if solkey not in self.solutions:
@@ -32,14 +32,30 @@ class Plot:
         # Interpolate the scattered data to the grid using griddata
         grid_sol = griddata((x, y), sol, (grid_x, grid_y), method='cubic')
 
-        # Plot the result using contourf
         plt.figure(figsize=(8, 6))
         plt.title(f'Solution Field {solkey}')
+        
+        # Plot contourf
         cp = plt.contourf(grid_x, grid_y, grid_sol, cmap='jet', levels=50)
         plt.colorbar(cp)
+
+        if streamlines:
+            if 'u' not in self.solutions or 'v' not in self.solutions:
+                raise KeyError("Streamline plotting requires 'u' and 'v' velocity components in solutions.")
+            
+            # Interpolate velocity components for streamlines
+            u = self.solutions['u']
+            v = self.solutions['v']
+            grid_u = griddata((x, y), u, (grid_x, grid_y), method='cubic')
+            grid_v = griddata((x, y), v, (grid_x, grid_y), method='cubic')
+            
+            # Plot streamlines
+            plt.streamplot(grid_x, grid_y, grid_u, grid_v, color='k', linewidth=1)
+
         plt.xlabel('X')
         plt.ylabel('Y')
         plt.axis('equal')
         plt.tight_layout()
         plt.show()
+
 

@@ -77,15 +77,16 @@ class LidDrivenCavity():
         self.mesh.solutions['v'] = sol[:, 1]
         self.mesh.solutions['p'] = sol[:, 2]
 
+        self.generate_plots()
+
         return
     
     def generate_plots(self):
         self.Plot = Plot(self.mesh)
         self.Post = Postprocess(self.Plot)
 
-    def plot(self, solkey = 'u'):
-        self.generate_plots()
-        self.Plot.plot(solkey)
+    def plot(self, solkey = 'u', streamlines = False):
+        self.Plot.plot(solkey, streamlines)
 
 
 
