@@ -77,7 +77,7 @@ class LidDrivenCavity():
         self.mesh.solutions['v'] = sol[:, 1]
         self.mesh.solutions['p'] = sol[:, 2]
 
-        self.generate_plots()
+        self.generate_plots()  # Generate plots after prediction
 
         return
     
