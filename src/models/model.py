@@ -34,23 +34,19 @@ class PINN:
         self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
         return loss
 
-    def train(self, loss_function, epochs, print_interval, autosave_interval):
+    def train(self, loss_function, epochs=1000, print_interval=100, autosave_interval=100, plot_loss=False):
         loss_history = []
         epoch_history = []
-
-        plt.ion()
-        fig, ax = plt.subplots()
-        ax.set_xlabel('Epoch')
-        ax.set_ylabel('Loss')
-        ax.set_yscale('log')  
-
-        ax.yaxis.set_major_formatter(ScalarFormatter())
-        ax.yaxis.set_minor_formatter(ScalarFormatter())
-        ax.yaxis.get_major_formatter().set_useOffset(False)
-        ax.yaxis.get_major_formatter().set_scientific(False)
-
-        line, = ax.semilogy([], [], label='Training Loss')
-        plt.legend()
+        
+        if plot_loss:
+            plt.ion()  # Turn on interactive mode
+            fig, ax = plt.subplots()
+            ax.set_xlabel('Epoch')
+            ax.set_ylabel('Loss')
+            ax.yaxis.get_major_formatter().set_useOffset(False)
+            ax.yaxis.get_major_formatter().set_scientific(False)
+            line, = ax.semilogy([], [], label='Training Loss')
+            plt.legend()
 
         for epoch in range(epochs):
             loss = self.train_step(loss_function)
@@ -59,21 +55,22 @@ class PINN:
                 loss_history.append(loss.numpy())
                 epoch_history.append(epoch + 1)
 
-                line.set_xdata(epoch_history)
-                line.set_ydata(loss_history)
-                ax.relim()  
-                ax.autoscale_view() 
-
-                plt.draw()
-                plt.pause(0.001)
+                if plot_loss:
+                    line.set_xdata(epoch_history)
+                    line.set_ydata(loss_history)
+                    ax.relim()  
+                    ax.autoscale_view() 
+                    plt.draw()
+                    plt.pause(0.001)
 
                 print(f"Epoch {epoch + 1}: Loss = {loss.numpy()}")
 
             if (epoch + 1) % autosave_interval == 0:
                 self.model.save(f'trainedModels/{self.eq}.tf')
 
-        plt.ioff()  # Turn off interactive mode
-        plt.close()
+        if plot_loss:
+            plt.ioff()  # Turn off interactive mode
+            plt.close()
 
     def predict(self, X):
         return self.model.predict(X)
