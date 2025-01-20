@@ -83,7 +83,6 @@ class LidDrivenCavity():
     
     def generate_plots(self):
         self.Plot = Plot(self.mesh)
-        self.Post = Postprocess(self.Plot)
 
     def plot(self, solkey = 'u', streamlines = False):
         self.Plot.plot(solkey, streamlines)
