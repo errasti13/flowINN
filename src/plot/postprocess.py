@@ -26,7 +26,7 @@ class Postprocess:
         else:
             magnitude = np.sqrt(u**2 + v**2)
             
-        self.solutions['velocity_magnitude'] = magnitude
+        self.solutions['vMag'] = magnitude
         return magnitude
     
     def compute_vorticity(self):

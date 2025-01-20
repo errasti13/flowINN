@@ -14,8 +14,13 @@ class Plot:
 
         self.solutions = mesh.solutions
 
+        self.postprocessor = Postprocess(self)
+
     def plot(self, solkey, streamlines):
         from scipy.interpolate import griddata
+
+        if solkey == 'vMag':
+            self.postprocessor.compute_velocity_magnitude()
 
         if solkey not in self.solutions:
             raise KeyError(
