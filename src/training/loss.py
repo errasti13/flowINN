@@ -1,17 +1,62 @@
 from src.physics.steadyNS import NavierStokes2D, NavierStokes3D
 import tensorflow as tf
+from typing import Union, Optional
 
 class NavierStokesLoss:
+    def __init__(self, mesh, model) -> None:
+        self._mesh = mesh
+        self._model = model
+        self._physics_loss = NavierStokes2D() if mesh.is2D else NavierStokes3D()
+        self._loss = None
+        self._nu: float = 0.01
 
-    def __init__(self, mesh, model):
-        self.mesh    = mesh
-        self.model   = model
+    @property
+    def mesh(self):
+        return self._mesh
 
-        self.physicsLoss = NavierStokes2D() if mesh.is2D else NavierStokes3D()
+    @mesh.setter
+    def mesh(self, value):
+        if not hasattr(value, 'is2D'):
+            raise ValueError("Mesh must have is2D attribute")
+        self._mesh = value
 
-        self.loss = None
+    @property
+    def model(self):
+        return self._model
 
-        self.nu = 0.01
+    @model.setter
+    def model(self, value):
+        self._model = value
+
+    @property
+    def physics_loss(self):
+        return self._physics_loss
+
+    @physics_loss.setter
+    def physics_loss(self, value):
+        if not isinstance(value, (NavierStokes2D, NavierStokes3D)):
+            raise TypeError("physics_loss must be NavierStokes2D or NavierStokes3D")
+        self._physics_loss = value
+
+    @property
+    def loss(self):
+        return self._loss
+
+    @loss.setter
+    def loss(self, value):
+        self._loss = value
+
+    @property
+    def nu(self) -> float:
+        return self._nu
+
+    @nu.setter
+    def nu(self, value: float):
+        if not isinstance(value, (int, float)):
+            raise TypeError("nu must be a number")
+        if value <= 0:
+            raise ValueError("nu must be positive")
+        self._nu = float(value)
 
     def loss_function(self):
         if self.mesh.is2D:
@@ -34,13 +79,7 @@ class NavierStokesLoss:
             v_pred = uvp_pred[:, 1]
             p_pred = uvp_pred[:, 2]
 
-            continuity, momentum_u, momentum_v = self.physicsLoss.get_residuals(u_pred, v_pred, p_pred, X, Y, tape)
-
-        f_loss_u = tf.reduce_mean(tf.square(momentum_u))
-        f_loss_v = tf.reduce_mean(tf.square(momentum_v))
-        continuity_loss = tf.reduce_mean(tf.square(continuity))
-
-        total_loss += f_loss_u + f_loss_v + continuity_loss
+            total_loss += self.compute_physics_loss(u_pred, v_pred, p_pred, X, Y, tape)
 
         # Compute boundary condition losses
         for boundary_key, boundary_data in self.mesh.boundaries.items():
@@ -60,7 +99,30 @@ class NavierStokesLoss:
             total_loss += uBc_loss + vBc_loss + pBc_loss
 
         return total_loss
+    
+    def compute_physics_loss(self, u_pred, v_pred, p_pred, X, Y, tape):
+        """Compute physics-based loss terms for Navier-Stokes equations.
+    
+        Args:
+            u_pred: Predicted x-velocity component
+            v_pred: Predicted y-velocity component
+            p_pred: Predicted pressure
+            X: X coordinates tensor
+            Y: Y coordinates tensor
+            tape: GradientTape instance for automatic differentiation
+            
+        Returns:
+            float: Combined physics loss from continuity and momentum equations
+        """
+            
+        continuity, momentum_u, momentum_v = self._physics_loss.get_residuals(u_pred, v_pred, p_pred, X, Y, tape)
 
+        f_loss_u = tf.reduce_mean(tf.square(momentum_u))
+        f_loss_v = tf.reduce_mean(tf.square(momentum_v))
+        continuity_loss = tf.reduce_mean(tf.square(continuity))
+
+        return f_loss_u + f_loss_v + continuity_loss
+         
     def convert_and_reshape(self, tensor, dtype=tf.float32, shape=(-1, 1)):
                         if tensor is not None:
                             return tf.reshape(tf.convert_to_tensor(tensor, dtype=dtype), shape)
