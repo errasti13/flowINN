@@ -1,15 +1,76 @@
 import numpy as np
 
 class Mesh:
-    def __init__(self, is2D = True):
-        self.X = None
-        self.Y = None
-        self.Z = None
+    def __init__(self, is2D: bool = True) -> None:
+        # Private attributes
+        self._x: np.ndarray = None
+        self._y: np.ndarray = None
+        self._z: np.ndarray = None
+        self._solutions: dict = {}
+        self._boundaries: dict = {}
+        self._is2D: bool = is2D
 
-        self.solutions = {}
-        self.is2D = is2D  # Default is 2D until explicitly set to 3D during mesh generation
+    # Coordinate properties
+    @property
+    def x(self) -> np.ndarray:
+        return self._x
 
-        self.boundaries = {}
+    @x.setter
+    def x(self, value: np.ndarray) -> None:
+        if not isinstance(value, np.ndarray):
+            raise TypeError("x must be a numpy array")
+        self._x = value
+
+    @property
+    def y(self) -> np.ndarray:
+        return self._y
+
+    @y.setter
+    def y(self, value: np.ndarray) -> None:
+        if not isinstance(value, np.ndarray):
+            raise TypeError("y must be a numpy array")
+        self._y = value
+
+    @property
+    def z(self) -> np.ndarray:
+        return self._z
+
+    @z.setter
+    def z(self, value: np.ndarray) -> None:
+        if not isinstance(value, np.ndarray):
+            raise TypeError("z must be a numpy array")
+        self._z = value
+
+    # Other properties
+    @property
+    def solutions(self) -> dict:
+        return self._solutions
+
+    @solutions.setter
+    def solutions(self, value: dict) -> None:
+        if not isinstance(value, dict):
+            raise TypeError("solutions must be a dictionary")
+        self._solutions = value
+
+    @property
+    def boundaries(self) -> dict:
+        return self._boundaries
+
+    @boundaries.setter
+    def boundaries(self, value: dict) -> None:
+        if not isinstance(value, dict):
+            raise TypeError("boundaries must be a dictionary")
+        self._boundaries = value
+
+    @property
+    def is2D(self) -> bool:
+        return self._is2D
+
+    @is2D.setter
+    def is2D(self, value: bool) -> None:
+        if not isinstance(value, bool):
+            raise TypeError("is2D must be a boolean")
+        self._is2D = value
 
     def generateMesh(self, x_range, y_range, z_range=None, Nx=100, Ny=100, Nz=None, sampling_method='random'):
         # Validate inputs
@@ -36,51 +97,62 @@ class Mesh:
 
         # Default to 2D if Nz is None
         if Nz is None:
-            Nz = 1 
+            Nz = 1
 
         nPoints = Nx * Ny * Nz
 
         # Sampling logic
         if sampling_method == 'random':
-            self.X = (np.random.rand(nPoints) * (x_max - x_min) + x_min).astype(np.float32)
-            self.Y = (np.random.rand(nPoints) * (y_max - y_min) + y_min).astype(np.float32)
-            
-            if Nz > 1:
-                self.Z = (np.random.rand(nPoints) * (z_max - z_min) + z_min).astype(np.float32)
+            self._x = (np.random.rand(nPoints) * (x_max - x_min) + x_min).astype(np.float32)
+            self._y = (np.random.rand(nPoints) * (y_max - y_min) + y_min).astype(np.float32)
+
+            if not self.is2D:
+                self._z = (np.random.rand(nPoints) * (z_max - z_min) + z_min).astype(np.float32)
 
         elif sampling_method == 'uniform':
-            self.X = np.linspace(x_min, x_max, nPoints)[:, None].astype(np.float32)
-            self.Y = np.linspace(y_min, y_max, nPoints)[:, None].astype(np.float32)
-            if not self.is2D:
-                self.Z = np.linspace(z_min, z_max, nPoints)[:, None].astype(np.float32)
+            x_lin = np.linspace(x_min, x_max, Nx)
+            y_lin = np.linspace(y_min, y_max, Ny)
+
+            if self.is2D:
+                self._x, self._y = np.meshgrid(x_lin, y_lin)
+                self._x, self._y = self._x.flatten().astype(np.float32), self._y.flatten().astype(np.float32)
+            else:
+                z_lin = np.linspace(z_min, z_max, Nz)
+                self._x, self._y, self._z = np.meshgrid(x_lin, y_lin, z_lin)
+                self._x, self._y, self._z = (
+                    self._x.flatten().astype(np.float32),
+                    self._y.flatten().astype(np.float32),
+                    self._z.flatten().astype(np.float32),
+                )
 
         else:
             raise ValueError(f"Unsupported sampling method: {sampling_method}")
-        
-        return 
-    
+
     def setBoundary(self, boundary_name, xBc, yBc, **boundary_conditions):
+        # Initialize boundary if not exists
+        if boundary_name not in self._boundaries:
+            self._boundaries[boundary_name] = {}
+
         # Set x and y coordinates for the boundary
-        self.boundaries[boundary_name]['x'] = xBc
-        self.boundaries[boundary_name]['y'] = yBc
+        self._boundaries[boundary_name]['x'] = xBc
+        self._boundaries[boundary_name]['y'] = yBc
 
         # Iterate over all specified boundary conditions
         for var_name, values in boundary_conditions.items():
-            if values is not None:
-                self.setBoundaryCodition(xBc, yBc, values, var_name, boundary_name)
-    
-    def setBoundaryCodition(self, xCoord, yCoord, value, varName, boundaryName, zCoord = None):
-        if boundaryName not in self.boundaries:
-            raise ValueError(f"Boundary name '{boundaryName}' is not valid. Available boundaries are: {list(self.boundaries.keys())}")
-        
-        if varName not in self.boundaries[boundaryName]:
-            raise ValueError(f"Variable name '{varName}' is not valid for boundary '{boundaryName}'. Available variables are: {list(self.boundaries[boundaryName].keys())}")
-    
-        self.boundaries[boundaryName]['x'] = xCoord
-        self.boundaries[boundaryName]['y'] = yCoord
+            self.setBoundaryCondition(xBc, yBc, values, var_name, boundary_name)
 
-        if self.is2D is not True:
-            self.boundaries[boundaryName]['z'] = zCoord
+    def setBoundaryCondition(self, xCoord, yCoord, value, varName, boundaryName, zCoord=None):
+        if boundaryName not in self._boundaries:
+            raise ValueError(f"Boundary name '{boundaryName}' is not valid. Available boundaries are: {list(self._boundaries.keys())}")
 
-        self.boundaries[boundaryName][varName] = value
-        return
+        if varName not in self._boundaries[boundaryName]:
+            self._boundaries[boundaryName][varName] = {}
+
+        self._boundaries[boundaryName]['x'] = xCoord
+        self._boundaries[boundaryName]['y'] = yCoord
+
+        if not self.is2D:
+            self._boundaries[boundaryName]['z'] = zCoord
+
+        self._boundaries[boundaryName][varName] = value
+
