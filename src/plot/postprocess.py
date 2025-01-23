@@ -20,7 +20,7 @@ class Postprocess:
         u = self.solutions['u']
         v = self.solutions['v']
         
-        if hasattr(self.plot, 'Z'):  # Check if it's a 3D problem
+        if self.plot.Z is not None:
             w = self.solutions['w']
             magnitude = np.sqrt(u**2 + v**2 + w**2)
         else:

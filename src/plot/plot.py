@@ -1,20 +1,69 @@
 import matplotlib.pyplot as plt
 import numpy as np
-
 from src.plot.postprocess import Postprocess
 
 class Plot:
-
     def __init__(self, mesh):
-        self.X = mesh.x
-        self.Y = mesh.y
+        self._X: np.ndarray = mesh.x
+        self._Y: np.ndarray = mesh.y
+        self._Z: np.ndarray = None
+        self._solutions: dict = mesh.solutions
+        self._postprocessor: Postprocess = None
 
-        if mesh.is2D == False:
-            self.Z = mesh.Z
+        if not mesh.is2D:
+            self._Z = mesh.Z
 
-        self.solutions = mesh.solutions
+        self._postprocessor = Postprocess(self)
 
-        self.postprocessor = Postprocess(self)
+    @property
+    def X(self) -> np.ndarray:
+        return self._X
+
+    @X.setter
+    def X(self, value: np.ndarray) -> None:
+        if not isinstance(value, np.ndarray):
+            raise TypeError("X must be a numpy array")
+        self._X = value
+
+    @property
+    def Y(self) -> np.ndarray:
+        return self._Y
+
+    @Y.setter
+    def Y(self, value: np.ndarray) -> None:
+        if not isinstance(value, np.ndarray):
+            raise TypeError("Y must be a numpy array")
+        self._Y = value
+
+    @property
+    def Z(self) -> np.ndarray:
+        return self._Z
+
+    @Z.setter
+    def Z(self, value: np.ndarray) -> None:
+        if not isinstance(value, np.ndarray):
+            raise TypeError("Z must be a numpy array")
+        self._Z = value
+
+    @property
+    def solutions(self) -> dict:
+        return self._solutions
+
+    @solutions.setter
+    def solutions(self, value: dict) -> None:
+        if not isinstance(value, dict):
+            raise TypeError("solutions must be a dictionary")
+        self._solutions = value
+
+    @property
+    def postprocessor(self) -> Postprocess:
+        return self._postprocessor
+
+    @postprocessor.setter
+    def postprocessor(self, value: Postprocess) -> None:
+        if not isinstance(value, Postprocess):
+            raise TypeError("postprocessor must be a Postprocess instance")
+        self._postprocessor = value
 
     def plot(self, solkey, streamlines):
         from scipy.interpolate import griddata
