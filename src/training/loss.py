@@ -1,7 +1,5 @@
 from src.physics.steadyNS import NavierStokes2D, NavierStokes3D
 import tensorflow as tf
-import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 class NavierStokesLoss:
 
@@ -22,8 +20,8 @@ class NavierStokesLoss:
             raise NotImplementedError("Only 2D loss functions are implemented for now.")
 
     def loss_function2D(self):
-        X = tf.reshape(tf.convert_to_tensor(self.mesh.X, dtype=tf.float32), [-1, 1])
-        Y = tf.reshape(tf.convert_to_tensor(self.mesh.Y, dtype=tf.float32), [-1, 1])
+        X = tf.reshape(tf.convert_to_tensor(self.mesh.x, dtype=tf.float32), [-1, 1])
+        Y = tf.reshape(tf.convert_to_tensor(self.mesh.y, dtype=tf.float32), [-1, 1])
 
         total_loss = 0
 

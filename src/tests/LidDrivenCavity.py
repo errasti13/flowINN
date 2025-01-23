@@ -70,7 +70,7 @@ class LidDrivenCavity():
         self.model.train(self.loss.loss_function, epochs=epochs, print_interval=print_interval,autosave_interval=autosaveInterval)
 
     def predict(self):
-        X = (np.hstack((self.mesh.X.flatten()[:, None], self.mesh.Y.flatten()[:, None])))
+        X = (np.hstack((self.mesh.x.flatten()[:, None], self.mesh.y.flatten()[:, None])))
         sol = self.model.predict(X)
 
         self.mesh.solutions['u'] = sol[:, 0]

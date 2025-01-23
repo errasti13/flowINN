@@ -6,8 +6,8 @@ from src.plot.postprocess import Postprocess
 class Plot:
 
     def __init__(self, mesh):
-        self.X = mesh.X
-        self.Y = mesh.Y
+        self.X = mesh.x
+        self.Y = mesh.y
 
         if mesh.is2D == False:
             self.Z = mesh.Z
