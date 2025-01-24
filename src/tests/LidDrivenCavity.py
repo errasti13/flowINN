@@ -9,7 +9,7 @@ from src.plot.postprocess import Postprocess
 class LidDrivenCavity():
     
     def __init__(self, caseName, xRange, yRange):
-        self.is2D = False
+        self.is2D = True
 
         self.problemTag = caseName
         self.mesh  = Mesh(self.is2D)
@@ -24,15 +24,6 @@ class LidDrivenCavity():
         return
     
     def generateMesh(self, Nx=200, Ny=200, NBoundary=100, sampling_method='random'):
-        # Generate the mesh
-        self.mesh.generateMesh(
-            x_range=self.xRange,
-            y_range=self.yRange,
-            Nx=Nx,
-            Ny=Ny,
-            sampling_method=sampling_method
-        )
-
         # Initialize boundaries
         self.mesh.boundaries = {
             'left': {'x': None, 'y': None, 'u': None, 'v': None, 'p': None},
@@ -60,6 +51,13 @@ class LidDrivenCavity():
                     np.full((NBoundary, 1), self.xRange[1], dtype=np.float32),
                     np.linspace(self.yRange[0], self.yRange[1], NBoundary),
                     u = np.zeros(NBoundary), v = np.zeros(NBoundary))
+        
+        # Generate the mesh
+        self.mesh.generateMesh(
+            Nx=Nx,
+            Ny=Ny,
+            sampling_method=sampling_method
+        )
         return
     
     def getLossFunction(self):
