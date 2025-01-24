@@ -89,11 +89,11 @@ class Mesh:
             raise ValueError("No boundaries defined. Use setBoundary() to define boundaries before generating mesh")
 
         try:
-            self._generateMeshFromBoundary(sampling_method)
+            self._generateMeshFromBoundary(sampling_method, Nx, Ny, Nz)
         except Exception as e:
             raise ValueError(f"Mesh generation failed: {str(e)}")
         
-    def _generateMeshFromBoundary(self, sampling_method):
+    def _generateMeshFromBoundary(self, sampling_method, Nx, Ny, Nz):
         # Validate that all boundaries contain 'x' and 'y' coordinates
         for boundary_name, boundary_data in self.boundaries.items():
             if 'x' not in boundary_data or 'y' not in boundary_data:
@@ -104,39 +104,43 @@ class Mesh:
         y_boundary = np.concatenate([np.array(boundary_data['y']).flatten() for boundary_data in self.boundaries.values()])
 
         # Sampling logic
+
         if sampling_method == 'random':
-            self._sampleRandomlyWithinBoundary(x_boundary, y_boundary)
+            self._sampleRandomlyWithinBoundary(x_boundary, y_boundary, Nx, Ny, Nz)
         elif sampling_method == 'uniform':
-            self._sampleUniformlyWithinBoundary(x_boundary, y_boundary)
+            self._sampleUniformlyWithinBoundary(x_boundary, y_boundary, Nx, Ny, Nz)
         else:
             raise ValueError(f"Unsupported sampling method: {sampling_method}")
 
 
-    def _sampleRandomlyWithinBoundary(self, x_boundary, y_boundary):
+    def _sampleRandomlyWithinBoundary(self, x_boundary, y_boundary, Nx, Ny, Nz):
+
+        Nt = Nx * Ny * Nz if not self.is2D else Nx * Ny
+
         # Create a Delaunay triangulation
         points = np.column_stack((x_boundary, y_boundary))
         triangulation = Delaunay(points)
         
         samples = []
-        while len(samples) < 1000:  # Example: target 1000 points
-            x_rand = np.random.uniform(np.min(x_boundary), np.max(x_boundary), size=1000)
-            y_rand = np.random.uniform(np.min(y_boundary), np.max(y_boundary), size=1000)
+        while len(samples) < Nt: 
+            x_rand = np.random.uniform(np.min(x_boundary), np.max(x_boundary), size=Nt)
+            y_rand = np.random.uniform(np.min(y_boundary), np.max(y_boundary), size=Nt)
             random_points = np.column_stack((x_rand, y_rand))
             
             # Check which points are inside the triangulation
             inside = triangulation.find_simplex(random_points) >= 0
             samples.extend(random_points[inside])
         
-        samples = np.array(samples[:1000])  # Keep only the first 1000 points
+        samples = np.array(samples)  # Keep only the first 1000 points
         self._x, self._y = samples[:, 0].astype(np.float32), samples[:, 1].astype(np.float32)
 
-    def _sampleUniformlyWithinBoundary(self, x_boundary, y_boundary):
+    def _sampleUniformlyWithinBoundary(self, x_boundary, y_boundary, Nx, Ny, Nz):
         # Create a regular grid and keep points inside the boundary
         x_min, x_max = np.min(x_boundary), np.max(x_boundary)
         y_min, y_max = np.min(y_boundary), np.max(y_boundary)
-        
+
         x_grid, y_grid = np.meshgrid(
-            np.linspace(x_min, x_max, 100), np.linspace(y_min, y_max, 100)
+            np.linspace(x_min, x_max, Nx), np.linspace(y_min, y_max, Ny)
         )
         grid_points = np.column_stack((x_grid.flatten(), y_grid.flatten()))
         
