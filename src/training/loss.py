@@ -3,12 +3,15 @@ import tensorflow as tf
 from typing import Union, Optional
 
 class NavierStokesLoss:
-    def __init__(self, mesh, model) -> None:
+    def __init__(self, mesh, model, weights = [0.8, 0.2]) -> None:
         self._mesh = mesh
         self._model = model
         self._physics_loss = NavierStokes2D() if mesh.is2D else NavierStokes3D()
         self._loss = None
         self._nu: float = 0.01
+
+        self.physicsWeight  = weights[0]
+        self.boundaryWeight = weights[1]
 
     @property
     def mesh(self):
@@ -79,7 +82,7 @@ class NavierStokesLoss:
             v_pred = uvp_pred[:, 1]
             p_pred = uvp_pred[:, 2]
 
-            total_loss += self.compute_physics_loss(u_pred, v_pred, p_pred, X, Y, tape)
+            total_loss += self.physicsWeight * self.compute_physics_loss(u_pred, v_pred, p_pred, X, Y, tape)
 
         # Compute boundary condition losses
         for boundary_key, boundary_data in self.mesh.boundaries.items():
@@ -96,7 +99,7 @@ class NavierStokesLoss:
             # Compute boundary losses for each condition
             uBc_loss, vBc_loss, pBc_loss = self.computeBoundaryLoss(self.model.model, xBc, yBc, uBc_tensor, vBc_tensor, pBc_tensor)
             
-            total_loss += uBc_loss + vBc_loss + pBc_loss
+            total_loss += self.boundaryWeight * (uBc_loss + vBc_loss + pBc_loss)
 
         return total_loss
     
