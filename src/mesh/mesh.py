@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.spatial import Delaunay
 
 class Mesh:
     def __init__(self, is2D: bool = True) -> None:
@@ -72,61 +73,83 @@ class Mesh:
             raise TypeError("is2D must be a boolean")
         self._is2D = value
 
-    def generateMesh(self, x_range, y_range, z_range=None, Nx=100, Ny=100, Nz=None, sampling_method='random'):
-        # Validate inputs
-        if not isinstance(x_range, (tuple, list)) or len(x_range) != 2:
-            raise ValueError("x_range must be a tuple or list with two elements (min, max).")
-        if not isinstance(y_range, (tuple, list)) or len(y_range) != 2:
-            raise ValueError("y_range must be a tuple or list with two elements (min, max).")
+    def generateMesh(self, Nx=100, Ny=100, Nz=None, sampling_method='random'):
+        """
+        Generate a mesh within a domain defined by boundary data.
 
-        # Check for z_range consistency with Nz
-        if z_range is not None and Nz is None:
-            raise ValueError("If z_range is provided, Nz must also be provided.")
-        if z_range is None and Nz is not None:
-            raise ValueError("If Nz is provided, z_range must also be provided.")
+        Parameters:
+        - Nx, Ny, Nz: Number of points in each dimension for structured sampling.
+        - sampling_method: Sampling method ('random', 'uniform').
 
-        self.is2D = z_range is None
+        Raises:
+        - ValueError: If input parameters are invalid or mesh generation fails
+        """
+        # Check if boundaries are defined
+        if not self.boundaries:
+            raise ValueError("No boundaries defined. Use setBoundary() to define boundaries before generating mesh")
 
-        x_min, x_max = x_range
-        y_min, y_max = y_range
+        try:
+            self._generateMeshFromBoundary(sampling_method)
+        except Exception as e:
+            raise ValueError(f"Mesh generation failed: {str(e)}")
+        
+    def _generateMeshFromBoundary(self, sampling_method):
+        # Validate that all boundaries contain 'x' and 'y' coordinates
+        for boundary_name, boundary_data in self.boundaries.items():
+            if 'x' not in boundary_data or 'y' not in boundary_data:
+                raise ValueError(f"Boundary '{boundary_name}' must contain 'x' and 'y' coordinates.")
 
-        if not self.is2D:
-            if not isinstance(z_range, (tuple, list)) or len(z_range) != 2:
-                raise ValueError("z_range must be a tuple or list with two elements (min, max) for 3D meshes.")
-            z_min, z_max = z_range
-
-        # Default to 2D if Nz is None
-        if Nz is None:
-            Nz = 1
-
-        nPoints = Nx * Ny * Nz
+        # Combine boundary coordinates into a single array for validation
+        x_boundary = np.concatenate([np.array(boundary_data['x']).flatten() for boundary_data in self.boundaries.values()])
+        y_boundary = np.concatenate([np.array(boundary_data['y']).flatten() for boundary_data in self.boundaries.values()])
 
         # Sampling logic
         if sampling_method == 'random':
-            self._x = (np.random.rand(nPoints) * (x_max - x_min) + x_min).astype(np.float32)
-            self._y = (np.random.rand(nPoints) * (y_max - y_min) + y_min).astype(np.float32)
-
-            if not self.is2D:
-                self._z = (np.random.rand(nPoints) * (z_max - z_min) + z_min).astype(np.float32)
-
+            self._sampleRandomlyWithinBoundary(x_boundary, y_boundary)
         elif sampling_method == 'uniform':
-            x_lin = np.linspace(x_min, x_max, Nx)
-            y_lin = np.linspace(y_min, y_max, Ny)
-
-            if self.is2D:
-                self._x, self._y = np.meshgrid(x_lin, y_lin)
-                self._x, self._y = self._x.flatten().astype(np.float32), self._y.flatten().astype(np.float32)
-            else:
-                z_lin = np.linspace(z_min, z_max, Nz)
-                self._x, self._y, self._z = np.meshgrid(x_lin, y_lin, z_lin)
-                self._x, self._y, self._z = (
-                    self._x.flatten().astype(np.float32),
-                    self._y.flatten().astype(np.float32),
-                    self._z.flatten().astype(np.float32),
-                )
-
+            self._sampleUniformlyWithinBoundary(x_boundary, y_boundary)
         else:
             raise ValueError(f"Unsupported sampling method: {sampling_method}")
+
+
+    def _sampleRandomlyWithinBoundary(self, x_boundary, y_boundary):
+        # Create a Delaunay triangulation
+        points = np.column_stack((x_boundary, y_boundary))
+        triangulation = Delaunay(points)
+        
+        samples = []
+        while len(samples) < 1000:  # Example: target 1000 points
+            x_rand = np.random.uniform(np.min(x_boundary), np.max(x_boundary), size=1000)
+            y_rand = np.random.uniform(np.min(y_boundary), np.max(y_boundary), size=1000)
+            random_points = np.column_stack((x_rand, y_rand))
+            
+            # Check which points are inside the triangulation
+            inside = triangulation.find_simplex(random_points) >= 0
+            samples.extend(random_points[inside])
+        
+        samples = np.array(samples[:1000])  # Keep only the first 1000 points
+        self._x, self._y = samples[:, 0].astype(np.float32), samples[:, 1].astype(np.float32)
+
+    def _sampleUniformlyWithinBoundary(self, x_boundary, y_boundary):
+        # Create a regular grid and keep points inside the boundary
+        x_min, x_max = np.min(x_boundary), np.max(x_boundary)
+        y_min, y_max = np.min(y_boundary), np.max(y_boundary)
+        
+        x_grid, y_grid = np.meshgrid(
+            np.linspace(x_min, x_max, 100), np.linspace(y_min, y_max, 100)
+        )
+        grid_points = np.column_stack((x_grid.flatten(), y_grid.flatten()))
+        
+        # Create a Delaunay triangulation
+        points = np.column_stack((x_boundary, y_boundary))
+        triangulation = Delaunay(points)
+        
+        # Check which grid points are inside the triangulation
+        inside = triangulation.find_simplex(grid_points) >= 0
+        inside_points = grid_points[inside]
+        
+        self._x, self._y = inside_points[:, 0].astype(np.float32), inside_points[:, 1].astype(np.float32)
+
 
     def setBoundary(self, boundary_name, xBc, yBc, **boundary_conditions):
         # Initialize boundary if not exists
