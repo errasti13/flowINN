@@ -23,7 +23,7 @@ class LidDrivenCavity():
 
         return
     
-    def generateMesh(self, Nx=200, Ny=200, NBoundary=100, sampling_method='random'):
+    def generateMesh(self, Nx=100, Ny=100, NBoundary=100, sampling_method='random'):
         # Initialize boundaries
         self.mesh.boundaries = {
             'left': {'x': None, 'y': None, 'u': None, 'v': None, 'p': None},
@@ -84,6 +84,7 @@ class LidDrivenCavity():
 
     def plot(self, solkey = 'u', streamlines = False):
         self.Plot.plot(solkey, streamlines)
+        #self.Plot.scatterPlot(solkey)
 
 
 
