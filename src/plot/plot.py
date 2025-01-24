@@ -112,4 +112,50 @@ class Plot:
         plt.tight_layout()
         plt.show()
 
+    def scatterPlot(self, solkey):
+        """
+        Create a scatter plot of the solution field.
+
+        Parameters:
+        - solkey: str, key of the solution to plot
+
+        Raises:
+        - KeyError: If solution key doesn't exist
+        - ValueError: If solution data is invalid
+        """
+        try:
+            if solkey == 'vMag':
+                self.postprocessor.compute_velocity_magnitude()
+
+            if solkey not in self.solutions:
+                raise KeyError(
+                    f"The solution key '{solkey}' was not found in the available solutions. "
+                    f"Available keys are: {list(self.solutions.keys())}."
+                )
+
+            x = self.X
+            y = self.Y
+            sol = self.solutions[solkey]
+
+            # Validate data
+            if len(x) != len(y) or len(x) != len(sol):
+                raise ValueError("Coordinate and solution arrays must have the same length")
+
+            plt.figure(figsize=(8, 6))
+            plt.title(f'Solution Field {solkey}')
+            
+            # Fixed scatter plot parameters
+            scatter = plt.scatter(x, y, s=5, c=sol, cmap='jet')
+            plt.colorbar(scatter, label=solkey)
+            
+            plt.xlabel('X')
+            plt.ylabel('Y')
+            plt.axis('equal')
+            plt.tight_layout()
+            plt.show()
+
+        except Exception as e:
+            plt.close()  # Close figure in case of error
+            raise type(e)(f"Error in scatter plot: {str(e)}")
+
 
