@@ -35,7 +35,7 @@ class LidDrivenCavity():
         self.mesh.setBoundary('top',
                     np.linspace(self.xRange[0], self.xRange[1], NBoundary),
                     np.full((NBoundary, 1), self.yRange[1], dtype=np.float32),
-                    u = np.ones(NBoundary))
+                    u = np.ones(NBoundary), v = np.zeros(NBoundary))
 
         self.mesh.setBoundary('bottom',
                     np.linspace(self.xRange[0], self.xRange[1], NBoundary),
