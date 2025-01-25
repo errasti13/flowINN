@@ -5,9 +5,9 @@ from src.models.model import PINN
 from src.training.loss import NavierStokesLoss
 from src.plot.plot import Plot
 
-class LidDrivenCavity():
+class FlowOverAirfoil():
     
-    def __init__(self, caseName, xRange, yRange):
+    def __init__(self, caseName, xRange, yRange, AoA = 0.0):
         self.is2D = True
 
         self.problemTag = caseName
@@ -20,15 +20,21 @@ class LidDrivenCavity():
         self.xRange = xRange
         self.yRange = yRange
 
+        self.AoA = AoA
+
         return
     
     def generateMesh(self, Nx=100, Ny=100, NBoundary=100, sampling_method='random'):
         # Initialize boundaries
         self.mesh.boundaries = {
-            'left': {'x': None, 'y': None, 'u': None, 'v': None, 'p': None},
-            'right': {'x': None, 'y': None, 'u': None, 'v': None, 'p': None},
+            'Inlet': {'x': None, 'y': None, 'u': None, 'v': None, 'p': None},
+            'Outlet': {'x': None, 'y': None, 'u': None, 'v': None, 'p': None},
             'bottom': {'x': None, 'y': None, 'u': None, 'v': None, 'p': None},
             'top': {'x': None, 'y': None, 'u': None, 'v': None, 'p': None}
+        }
+
+        self.mesh.interiorBoundaries = {
+            'Airfoil': {'x': None, 'y': None, 'u': None, 'v': None, 'p': None}
         }
         
         self.mesh.setBoundary('top',
@@ -41,15 +47,21 @@ class LidDrivenCavity():
                     np.full((NBoundary, 1), self.yRange[0], dtype=np.float32),
                     u = np.zeros(NBoundary), v = np.zeros(NBoundary))
 
-        self.mesh.setBoundary('left',
+        self.mesh.setBoundary('Inlet',
                     np.full((NBoundary, 1), self.xRange[0], dtype=np.float32),
                     np.linspace(self.yRange[0], self.yRange[1], NBoundary),
                     u = np.zeros(NBoundary), v = np.zeros(NBoundary))
 
-        self.mesh.setBoundary('right',
+        self.mesh.setBoundary('Outlet',
                     np.full((NBoundary, 1), self.xRange[1], dtype=np.float32),
                     np.linspace(self.yRange[0], self.yRange[1], NBoundary),
                     u = np.zeros(NBoundary), v = np.zeros(NBoundary))
+        
+        self.mesh.setBoundary('Airfoil',
+                    np.full((NBoundary, 1), self.xRange[1], dtype=np.float32),
+                    np.linspace(self.yRange[0], self.yRange[1], NBoundary),
+                    u = np.zeros(NBoundary), v = np.zeros(NBoundary),
+                    interior=True)
         
         # Generate the mesh
         self.mesh.generateMesh(

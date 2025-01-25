@@ -4,7 +4,6 @@ from src.mesh.mesh import Mesh
 from src.models.model import PINN
 from src.training.loss import NavierStokesLoss
 from src.plot.plot import Plot
-from src.plot.postprocess import Postprocess
 
 class LidDrivenCavity():
     
