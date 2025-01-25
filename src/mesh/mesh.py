@@ -9,6 +9,7 @@ class Mesh:
         self._z: np.ndarray = None
         self._solutions: dict = {}
         self._boundaries: dict = {}
+        self._interiorBoundaries: dict = {}
         self._is2D: bool = is2D
 
     # Coordinate properties
@@ -64,6 +65,16 @@ class Mesh:
         self._boundaries = value
 
     @property
+    def interiorBoundaries(self) -> dict:
+        return self._interiorBoundaries
+
+    @interiorBoundaries.setter
+    def interiorBoundaries(self, value: dict) -> None:
+        if not isinstance(value, dict):
+            raise TypeError("interiorBoundaries must be a dictionary")
+        self._interiorBoundaries = value
+        
+    @property
     def is2D(self) -> bool:
         return self._is2D
 
@@ -104,7 +115,6 @@ class Mesh:
         y_boundary = np.concatenate([np.array(boundary_data['y']).flatten() for boundary_data in self.boundaries.values()])
 
         # Sampling logic
-
         if sampling_method == 'random':
             self._sampleRandomlyWithinBoundary(x_boundary, y_boundary, Nx, Ny, Nz)
         elif sampling_method == 'uniform':
@@ -155,31 +165,54 @@ class Mesh:
         self._x, self._y = inside_points[:, 0].astype(np.float32), inside_points[:, 1].astype(np.float32)
 
 
-    def setBoundary(self, boundary_name, xBc, yBc, **boundary_conditions):
-        # Initialize boundary if not exists
-        if boundary_name not in self._boundaries:
-            self._boundaries[boundary_name] = {}
-
-        # Set x and y coordinates for the boundary
-        self._boundaries[boundary_name]['x'] = xBc
-        self._boundaries[boundary_name]['y'] = yBc
-
-        # Iterate over all specified boundary conditions
+    def setBoundary(self, boundary_name, xBc, yBc, interior=False, **boundary_conditions):
+        """
+        Set multiple boundary conditions at once.
+        
+        Parameters:
+        - boundary_name: name of the boundary
+        - xBc: x coordinates of the boundary
+        - yBc: y coordinates of the boundary
+        - interior: boolean flag to indicate if this is an interior boundary
+        - **boundary_conditions: variable names and their values
+        """
         for var_name, values in boundary_conditions.items():
-            self.setBoundaryCondition(xBc, yBc, values, var_name, boundary_name)
+            self.setBoundaryCondition(xBc, yBc, values, var_name, boundary_name, interior=interior)
 
-    def setBoundaryCondition(self, xCoord, yCoord, value, varName, boundaryName, zCoord=None):
-        if boundaryName not in self._boundaries:
-            raise ValueError(f"Boundary name '{boundaryName}' is not valid. Available boundaries are: {list(self._boundaries.keys())}")
-
-        if varName not in self._boundaries[boundaryName]:
-            self._boundaries[boundaryName][varName] = {}
-
-        self._boundaries[boundaryName]['x'] = xCoord
-        self._boundaries[boundaryName]['y'] = yCoord
-
-        if not self.is2D:
-            self._boundaries[boundaryName]['z'] = zCoord
-
-        self._boundaries[boundaryName][varName] = value
+    def setBoundaryCondition(self, xCoord, yCoord, value, varName, boundaryName, zCoord=None, interior=False):
+        """
+        Set boundary conditions for either exterior or interior boundaries.
+        
+        Parameters:
+        - xCoord: x coordinates of the boundary
+        - yCoord: y coordinates of the boundary
+        - value: boundary condition value
+        - varName: variable name for the boundary condition
+        - boundaryName: name of the boundary
+        - zCoord: z coordinates (optional, for 3D)
+        - interior: boolean flag to indicate if this is an interior boundary
+        """
+        # Select appropriate boundary dictionary
+        boundary_dict = self._interiorBoundaries if interior else self._boundaries
+        
+        # Initialize boundary if it doesn't exist
+        if boundaryName not in boundary_dict:
+            boundary_dict[boundaryName] = {}
+            
+        # Initialize variable if it doesn't exist
+        if varName not in boundary_dict[boundaryName]:
+            boundary_dict[boundaryName][varName] = {}
+            
+        # Set coordinates
+        boundary_dict[boundaryName]['x'] = xCoord
+        boundary_dict[boundaryName]['y'] = yCoord
+        
+        if not self.is2D and zCoord is not None:
+            boundary_dict[boundaryName]['z'] = zCoord
+            
+        # Set boundary condition value
+        boundary_dict[boundaryName][varName] = value
+        
+        # Set type flag
+        boundary_dict[boundaryName]['isInterior'] = interior
 
