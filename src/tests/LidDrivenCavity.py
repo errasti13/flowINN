@@ -84,7 +84,3 @@ class LidDrivenCavity():
 
     def plot(self, solkey = 'u', streamlines = False):
         self.Plot.plot(solkey, streamlines)
-        #self.Plot.scatterPlot(solkey)
-
-
-
