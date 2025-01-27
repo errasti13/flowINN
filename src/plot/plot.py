@@ -4,56 +4,16 @@ from src.plot.postprocess import Postprocess
 
 class Plot:
     def __init__(self, mesh):
-        self._X: np.ndarray = mesh.x
-        self._Y: np.ndarray = mesh.y
-        self._Z: np.ndarray = None
-        self._solutions: dict = mesh.solutions
+        self._mesh = mesh
         self._postprocessor: Postprocess = None
 
-        if not mesh.is2D:
-            self._Z = mesh.Z
-
-        self._postprocessor = Postprocess(self)
-
     @property
-    def X(self) -> np.ndarray:
-        return self._X
+    def mesh(self) -> None:
+        return self._mesh
 
-    @X.setter
-    def X(self, value: np.ndarray) -> None:
-        if not isinstance(value, np.ndarray):
-            raise TypeError("X must be a numpy array")
-        self._X = value
-
-    @property
-    def Y(self) -> np.ndarray:
-        return self._Y
-
-    @Y.setter
-    def Y(self, value: np.ndarray) -> None:
-        if not isinstance(value, np.ndarray):
-            raise TypeError("Y must be a numpy array")
-        self._Y = value
-
-    @property
-    def Z(self) -> np.ndarray:
-        return self._Z
-
-    @Z.setter
+    @mesh.setter
     def Z(self, value: np.ndarray) -> None:
-        if not isinstance(value, np.ndarray):
-            raise TypeError("Z must be a numpy array")
-        self._Z = value
-
-    @property
-    def solutions(self) -> dict:
-        return self._solutions
-
-    @solutions.setter
-    def solutions(self, value: dict) -> None:
-        if not isinstance(value, dict):
-            raise TypeError("solutions must be a dictionary")
-        self._solutions = value
+        self._mesh = value
 
     @property
     def postprocessor(self) -> Postprocess:
@@ -77,9 +37,9 @@ class Plot:
                 f"Available keys are: {list(self.solutions.keys())}."
             )
 
-        x = self.X
-        y = self.Y
-        sol = self.solutions[solkey]
+        x = self.mesh.x
+        y = self.mesh.y
+        sol = self.mesh.solutions[solkey]
 
         grid_x, grid_y = np.meshgrid(np.linspace(x.min(), x.max(), 100), np.linspace(y.min(), y.max(), 100))
 
@@ -114,48 +74,42 @@ class Plot:
 
     def scatterPlot(self, solkey):
         """
-        Create a scatter plot of the solution field.
-
-        Parameters:
-        - solkey: str, key of the solution to plot
-
-        Raises:
-        - KeyError: If solution key doesn't exist
-        - ValueError: If solution data is invalid
+        Visualize the mesh points and boundaries.
+        Shows interior boundaries in red and exterior boundaries in blue.
         """
-        try:
-            if solkey == 'vMag':
-                self.postprocessor.compute_velocity_magnitude()
 
-            if solkey not in self.solutions:
-                raise KeyError(
-                    f"The solution key '{solkey}' was not found in the available solutions. "
-                    f"Available keys are: {list(self.solutions.keys())}."
-                )
+        x = self.mesh.x.flatten()
+        y = self.mesh.y.flatten()       
 
-            x = self.X
-            y = self.Y
-            sol = self.solutions[solkey]
-
-            # Validate data
-            if len(x) != len(y) or len(x) != len(sol):
-                raise ValueError("Coordinate and solution arrays must have the same length")
-
-            plt.figure(figsize=(8, 6))
-            plt.title(f'Solution Field {solkey}')
-            
-            # Fixed scatter plot parameters
-            scatter = plt.scatter(x, y, s=5, c=sol, cmap='jet')
-            plt.colorbar(scatter, label=solkey)
-            
-            plt.xlabel('X')
-            plt.ylabel('Y')
-            plt.axis('equal')
-            plt.tight_layout()
-            plt.show()
-
-        except Exception as e:
-            plt.close()  # Close figure in case of error
-            raise type(e)(f"Error in scatter plot: {str(e)}")
-
+        sol = self.mesh.solutions[solkey]
+        plt.figure(figsize=(8, 6))
+        plt.title('Mesh Visualization')
+        
+        # Plot mesh points
+        plt.scatter(x, y, c=sol, s=5, alpha=0.5, label='Mesh Points')
+        
+        # Plot exterior boundaries
+        for boundary_data in self.mesh.boundaries.values():
+            x_boundary = boundary_data['x']
+            y_boundary = boundary_data['y']
+            plt.plot(x_boundary, y_boundary, 'b-', linewidth=2, label='Exterior Boundary')
+        
+        # Plot interior boundaries if they exist
+        if self.mesh.interiorBoundaries:
+            for boundary_data in self.mesh.interiorBoundaries.values():
+                x_boundary = boundary_data['x']
+                y_boundary = boundary_data['y']
+                plt.plot(x_boundary, y_boundary, 'r-', linewidth=2, label='Interior Boundary')
+        
+        plt.xlabel('X')
+        plt.ylabel('Y')
+        plt.axis('equal')
+        
+        # Remove duplicate labels
+        handles, labels = plt.gca().get_legend_handles_labels()
+        by_label = dict(zip(labels, handles))
+        plt.legend(by_label.values(), by_label.keys())
+        
+        plt.tight_layout()
+        plt.show()
 
