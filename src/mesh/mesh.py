@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.spatial import Delaunay
+import matplotlib.pyplot as plt  # Add this import at the top
 
 class Mesh:
     def __init__(self, is2D: bool = True) -> None:
@@ -124,24 +125,41 @@ class Mesh:
 
 
     def _sampleRandomlyWithinBoundary(self, x_boundary, y_boundary, Nx, Ny, Nz):
-
         Nt = Nx * Ny * Nz if not self.is2D else Nx * Ny
 
-        # Create a Delaunay triangulation
-        points = np.column_stack((x_boundary, y_boundary))
-        triangulation = Delaunay(points)
+        # Create Delaunay triangulation for exterior boundary
+        exterior_points = np.column_stack((x_boundary, y_boundary))
+        exterior_triangulation = Delaunay(exterior_points)
+        
+        # Create Delaunay triangulation for interior boundaries if they exist
+        interior_triangulations = []
+        if self._interiorBoundaries:
+            for boundary_data in self._interiorBoundaries.values():
+                x_interior = np.array(boundary_data['x']).flatten()
+                y_interior = np.array(boundary_data['y']).flatten()
+                interior_points = np.column_stack((x_interior, y_interior))
+                interior_triangulations.append(Delaunay(interior_points))
         
         samples = []
-        while len(samples) < Nt: 
+        while len(samples) < Nt:
+            # Generate random points
             x_rand = np.random.uniform(np.min(x_boundary), np.max(x_boundary), size=Nt)
             y_rand = np.random.uniform(np.min(y_boundary), np.max(y_boundary), size=Nt)
             random_points = np.column_stack((x_rand, y_rand))
             
-            # Check which points are inside the triangulation
-            inside = triangulation.find_simplex(random_points) >= 0
-            samples.extend(random_points[inside])
+            # Check which points are inside exterior boundary
+            inside_exterior = exterior_triangulation.find_simplex(random_points) >= 0
+            
+            # Check which points are inside any interior boundary
+            inside_interior = np.zeros_like(inside_exterior, dtype=bool)
+            for interior_tri in interior_triangulations:
+                inside_interior = inside_interior | (interior_tri.find_simplex(random_points) >= 0)
+            
+            # Keep points that are inside exterior but outside all interior boundaries
+            valid_points = random_points[inside_exterior & ~inside_interior]
+            samples.extend(valid_points)
         
-        samples = np.array(samples)  # Keep only the first 1000 points
+        samples = np.array(samples)[:Nt]  # Keep exactly Nt points
         self._x, self._y = samples[:, 0].astype(np.float32), samples[:, 1].astype(np.float32)
 
     def _sampleUniformlyWithinBoundary(self, x_boundary, y_boundary, Nx, Ny, Nz):
@@ -216,3 +234,38 @@ class Mesh:
         # Set type flag
         boundary_dict[boundaryName]['isInterior'] = interior
 
+    def showMesh(self):
+        """
+        Visualize the mesh points and boundaries.
+        Shows interior boundaries in red and exterior boundaries in blue.
+        """
+        plt.figure(figsize=(8, 6))
+        plt.title('Mesh Visualization')
+        
+        # Plot mesh points
+        plt.scatter(self.x, self.y, c='black', s=1, alpha=0.5, label='Mesh Points')
+        
+        # Plot exterior boundaries
+        for boundary_data in self.boundaries.values():
+            x_boundary = boundary_data['x']
+            y_boundary = boundary_data['y']
+            plt.plot(x_boundary, y_boundary, 'b-', linewidth=2, label='Exterior Boundary')
+        
+        # Plot interior boundaries if they exist
+        if self.interiorBoundaries:
+            for boundary_data in self.interiorBoundaries.values():
+                x_boundary = boundary_data['x']
+                y_boundary = boundary_data['y']
+                plt.plot(x_boundary, y_boundary, 'r-', linewidth=2, label='Interior Boundary')
+        
+        plt.xlabel('X')
+        plt.ylabel('Y')
+        plt.axis('equal')
+        
+        # Remove duplicate labels
+        handles, labels = plt.gca().get_legend_handles_labels()
+        by_label = dict(zip(labels, handles))
+        plt.legend(by_label.values(), by_label.keys())
+        
+        plt.tight_layout()
+        plt.show()
