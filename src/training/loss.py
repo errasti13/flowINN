@@ -3,13 +3,14 @@ import tensorflow as tf
 from typing import Union, Optional
 
 class NavierStokesLoss:
-    def __init__(self, mesh, model, weights = [0.8, 0.2]) -> None:
+    def __init__(self, mesh, model, weights = [0.5, 0.5]) -> None:  # Updated weights
         self._mesh = mesh
         self._model = model
         self._physics_loss = NavierStokes2D() if mesh.is2D else NavierStokes3D()
         self._loss = None
         self._nu: float = 0.01
 
+        # Update weights to include interior boundary weight
         self.physicsWeight  = weights[0]
         self.boundaryWeight = weights[1]
 
@@ -71,38 +72,68 @@ class NavierStokesLoss:
         X = tf.reshape(tf.convert_to_tensor(self.mesh.x, dtype=tf.float32), [-1, 1])
         Y = tf.reshape(tf.convert_to_tensor(self.mesh.y, dtype=tf.float32), [-1, 1])
 
-        total_loss = 0
+        total_loss = 0.0
 
+        # Compute physics loss
         with tf.GradientTape(persistent=True) as tape:
             tape.watch([X, Y])
-
-            # Compute predictions
             uvp_pred = self.model.model(tf.concat([X, Y], axis=1))
             u_pred = uvp_pred[:, 0]
             v_pred = uvp_pred[:, 1]
             p_pred = uvp_pred[:, 2]
 
-            total_loss += self.physicsWeight * self.compute_physics_loss(u_pred, v_pred, p_pred, X, Y, tape)
+            physics_loss = self.compute_physics_loss(u_pred, v_pred, p_pred, X, Y, tape)
+            total_loss += self.physicsWeight * physics_loss
 
-        # Compute boundary condition losses
-        for boundary_key, boundary_data in self.mesh.boundaries.items():
-            xBc = boundary_data['x']
-            yBc = boundary_data['y']
-            uBc = boundary_data['u']
-            vBc = boundary_data['v']
-            pBc = boundary_data['p']
+        # Compute exterior boundary losses
+        boundary_loss = 0.0
+        for boundary_name, boundary_data in self.mesh.boundaries.items():
+            try:
+                xBc = self.convert_and_reshape(boundary_data['x'])
+                yBc = self.convert_and_reshape(boundary_data['y'])
+                uBc, vBc, pBc = self.imposeBoundaryCondition(
+                    boundary_data.get('u'), 
+                    boundary_data.get('v'), 
+                    boundary_data.get('p')
+                )
 
-            xBc = self.convert_and_reshape(xBc)
-            yBc = self.convert_and_reshape(yBc)
-            uBc_tensor, vBc_tensor, pBc_tensor = self.imposeBoundaryCondition(uBc, vBc, pBc)
-
-            # Compute boundary losses for each condition
-            uBc_loss, vBc_loss, pBc_loss = self.computeBoundaryLoss(self.model.model, xBc, yBc, uBc_tensor, vBc_tensor, pBc_tensor)
+                u_loss, v_loss, p_loss = self.computeBoundaryLoss(
+                    self.model.model, xBc, yBc, uBc, vBc, pBc
+                )
+                boundary_loss += (u_loss + v_loss + p_loss)
             
-            total_loss += self.boundaryWeight * (uBc_loss + vBc_loss + pBc_loss)
+            except Exception as e:
+                print(f"Warning: Error processing boundary {boundary_name}: {str(e)}")
+                continue
+
+        total_loss += self.boundaryWeight * boundary_loss
+
+        # Compute interior boundary losses separately
+        interior_loss = 0.0
+        if self.mesh.interiorBoundaries:
+            for boundary_name, boundary_data in self.mesh.interiorBoundaries.items():
+                try:
+                    xBc = self.convert_and_reshape(boundary_data['x'])
+                    yBc = self.convert_and_reshape(boundary_data['y'])
+                    uBc, vBc, pBc = self.imposeBoundaryCondition(
+                        boundary_data.get('u'), 
+                        boundary_data.get('v'), 
+                        boundary_data.get('p')
+                    )
+
+                    u_loss, v_loss, p_loss = self.computeBoundaryLoss(
+                        self.model.model, xBc, yBc, uBc, vBc, pBc
+                    )
+                    interior_loss += (u_loss + v_loss + p_loss)
+                
+                except Exception as e:
+                    print(f"Warning: Error processing boundary {boundary_name}: {str(e)}")
+                    continue
+
+            total_loss += self.boundaryWeight * interior_loss
 
         return total_loss
-    
+
     def compute_physics_loss(self, u_pred, v_pred, p_pred, X, Y, tape):
         """Compute physics-based loss terms for Navier-Stokes equations.
     
