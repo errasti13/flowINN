@@ -21,7 +21,37 @@ class FlowOverAirfoil():
         self.yRange = yRange
 
         self.AoA = AoA
+        self.c   = 1.0  #Airfoil Chord
+        self.x0  = 0.0  #Airfoil leading edge x coordinate
+        self.y0  = 0.0  #Airfoil leading edge y coordinate
 
+        self.generate_airfoil_coords()
+
+        return
+    
+    def generate_airfoil_coords(self, N=100, thickness=0.12):
+        """
+        Generate NACA 4-digit airfoil coordinates for both upper and lower surfaces.
+        The lower surface is just the negative of the upper surface.
+        """
+        # Generate x coordinates
+        x = np.linspace(self.x0, self.x0 + self.c, N)
+        x_normalized = x / self.c
+        
+        # Generate upper surface
+        y_upper = self.y0 + 5 * thickness * (0.2969 * np.sqrt(x_normalized) 
+                                - 0.1260 * x_normalized 
+                                - 0.3516 * x_normalized**2 
+                                + 0.2843 * x_normalized**3 
+                                - 0.1015 * x_normalized**4)
+        
+        # Generate lower surface
+        y_lower = self.y0 - y_upper
+        
+        # Combine coordinates in the correct order (counterclockwise)
+        self.xAirfoil = np.concatenate([x, np.flip(x)]).reshape(-1, 1)
+        self.yAirfoil = np.concatenate([y_upper, np.flip(y_lower)]).reshape(-1, 1)
+        
         return
     
     def generateMesh(self, Nx=100, Ny=100, NBoundary=100, sampling_method='random'):
@@ -45,22 +75,23 @@ class FlowOverAirfoil():
         self.mesh.setBoundary('bottom',
                     np.linspace(self.xRange[0], self.xRange[1], NBoundary),
                     np.full((NBoundary, 1), self.yRange[0], dtype=np.float32),
-                    u = np.zeros(NBoundary), v = np.zeros(NBoundary))
+                    u = np.ones(NBoundary), v = np.zeros(NBoundary))
 
         self.mesh.setBoundary('Inlet',
                     np.full((NBoundary, 1), self.xRange[0], dtype=np.float32),
                     np.linspace(self.yRange[0], self.yRange[1], NBoundary),
-                    u = np.zeros(NBoundary), v = np.zeros(NBoundary))
+                    u = np.ones(NBoundary), v = np.zeros(NBoundary))
 
         self.mesh.setBoundary('Outlet',
                     np.full((NBoundary, 1), self.xRange[1], dtype=np.float32),
                     np.linspace(self.yRange[0], self.yRange[1], NBoundary),
-                    u = np.zeros(NBoundary), v = np.zeros(NBoundary))
+                    u = np.ones(NBoundary), v = np.zeros(NBoundary))
         
         self.mesh.setBoundary('Airfoil',
-                    np.full((NBoundary, 1), self.xRange[1], dtype=np.float32),
-                    np.linspace(self.yRange[0], self.yRange[1], NBoundary),
-                    u = np.zeros(NBoundary), v = np.zeros(NBoundary),
+                    self.xAirfoil,
+                    self.yAirfoil,
+                    u = np.zeros(NBoundary), 
+                    v = np.zeros(NBoundary),
                     interior=True)
         
         # Generate the mesh
@@ -94,4 +125,4 @@ class FlowOverAirfoil():
         self.Plot = Plot(self.mesh)
 
     def plot(self, solkey = 'u', streamlines = False):
-        self.Plot.plot(solkey, streamlines)
+        self.Plot.scatterPlot(solkey)
