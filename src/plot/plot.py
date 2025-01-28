@@ -80,35 +80,61 @@ class Plot:
         y = self.mesh.y.flatten()       
 
         sol = self.mesh.solutions[solkey]
-        plt.figure(figsize=(8, 6))
-        plt.title(f'Solution Field: {solkey}')  # Changed title
+        plt.figure(figsize=(10, 8))  # Larger figure size
+        plt.title(f'Solution Field: {solkey}', fontsize=12)
         
-        # Plot mesh points
-        scatter = plt.scatter(x, y, c=sol, s=5, cmap='jet')  # Removed label from scatter
-        plt.colorbar(scatter, label=solkey)  # Added label to colorbar
+        # Create custom colormap with better contrast
+        plt.set_cmap('viridis')
         
-        # Plot exterior boundaries
+        # Plot mesh points with improved visibility
+        scatter = plt.scatter(x, y, 
+                            c=sol, 
+                            s=20,       # Larger points
+                            alpha=0.6,  # Semi-transparent
+                            cmap='jet',
+                            zorder=2)   # Draw above boundaries
+        
+        # Add colorbar with better formatting
+        cbar = plt.colorbar(scatter, label=solkey)
+        cbar.ax.tick_params(labelsize=10)
+        
+        # Plot exterior boundaries with better visibility
         for boundary_data in self.mesh.boundaries.values():
             x_boundary = boundary_data['x']
             y_boundary = boundary_data['y']
-            plt.plot(x_boundary, y_boundary, 'b-', linewidth=2, label='Exterior Boundary')
+            plt.plot(x_boundary, y_boundary, 
+                    'k-',           # Black lines
+                    linewidth=1.5,  # Thicker lines
+                    zorder=3,       # Draw above scatter
+                    label='Exterior Boundary')
         
         # Plot interior boundaries if they exist
         if self.mesh.interiorBoundaries:
             for boundary_data in self.mesh.interiorBoundaries.values():
                 x_boundary = boundary_data['x']
                 y_boundary = boundary_data['y']
-                plt.plot(x_boundary, y_boundary, 'r-', linewidth=2, label='Interior Boundary')
+                plt.plot(x_boundary, y_boundary, 
+                        'r-',           # Red lines
+                        linewidth=2,    # Thicker lines
+                        zorder=3,       # Draw above scatter
+                        label='Interior Boundary')
         
-        plt.xlabel('X')
-        plt.ylabel('Y')
+        plt.xlabel('X', fontsize=11)
+        plt.ylabel('Y', fontsize=11)
         plt.axis('equal')
         
-        # Remove duplicate labels
+        # Remove duplicate labels and position legend
         handles, labels = plt.gca().get_legend_handles_labels()
         by_label = dict(zip(labels, handles))
-        plt.legend(by_label.values(), by_label.keys())
+        plt.legend(by_label.values(), by_label.keys(), 
+                  loc='upper right', 
+                  framealpha=0.9,
+                  fontsize=10)
         
+        # Add grid for better readability
+        plt.grid(True, linestyle='--', alpha=0.3, zorder=1)
+        
+        # Adjust layout and display
         plt.tight_layout()
         plt.show()
 
