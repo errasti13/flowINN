@@ -28,13 +28,13 @@ class Plot:
     def plot(self, solkey, streamlines):
         from scipy.interpolate import griddata
 
-        if solkey == 'vMag':
+        if solkey == 'vMag' and 'vMag' not in self.mesh.solutions:
             self.postprocessor.compute_velocity_magnitude()
 
-        if solkey not in self.solutions:
+        if solkey not in self.mesh.solutions:
             raise KeyError(
                 f"The solution key '{solkey}' was not found in the available solutions. "
-                f"Available keys are: {list(self.solutions.keys())}."
+                f"Available keys are: {list(self.mesh.solutions.keys())}."
             )
 
         x = self.mesh.x
@@ -54,12 +54,12 @@ class Plot:
         plt.colorbar(cp)
 
         if streamlines:
-            if 'u' not in self.solutions or 'v' not in self.solutions:
+            if 'u' not in self.mesh.solutions or 'v' not in self.mesh.solutions:
                 raise KeyError("Streamline plotting requires 'u' and 'v' velocity components in solutions.")
             
             # Interpolate velocity components for streamlines
-            u = self.solutions['u']
-            v = self.solutions['v']
+            u = self.mesh.solutions['u']
+            v = self.mesh.solutions['v']
             grid_u = griddata((x, y), u, (grid_x, grid_y), method='cubic')
             grid_v = griddata((x, y), v, (grid_x, grid_y), method='cubic')
             
@@ -74,19 +74,18 @@ class Plot:
 
     def scatterPlot(self, solkey):
         """
-        Visualize the mesh points and boundaries.
-        Shows interior boundaries in red and exterior boundaries in blue.
+        Visualize the solution field using scatter plot with boundaries.
         """
-
         x = self.mesh.x.flatten()
         y = self.mesh.y.flatten()       
 
         sol = self.mesh.solutions[solkey]
         plt.figure(figsize=(8, 6))
-        plt.title('Mesh Visualization')
+        plt.title(f'Solution Field: {solkey}')  # Changed title
         
         # Plot mesh points
-        plt.scatter(x, y, c=sol, s=5, alpha=0.5, label='Mesh Points')
+        scatter = plt.scatter(x, y, c=sol, s=5, cmap='jet')  # Removed label from scatter
+        plt.colorbar(scatter, label=solkey)  # Added label to colorbar
         
         # Plot exterior boundaries
         for boundary_data in self.mesh.boundaries.values():
