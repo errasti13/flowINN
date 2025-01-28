@@ -90,8 +90,8 @@ class FlowOverAirfoil():
         self.mesh.setBoundary('Airfoil',
                     self.xAirfoil,
                     self.yAirfoil,
-                    u = np.zeros(NBoundary), 
-                    v = np.zeros(NBoundary),
+                    u = np.zeros(len(self.xAirfoil)), 
+                    v = np.zeros(len(self.yAirfoil)),
                     interior=True)
         
         # Generate the mesh
