@@ -1,17 +1,31 @@
 import numpy as np
-
-from src.mesh.mesh import Mesh
+import logging
+from typing import Tuple, Optional
+from src.mesh.meshio import MeshIO  # Change import
 from src.models.model import PINN
 from src.training.loss import NavierStokesLoss
 from src.plot.plot import Plot
 
-class FlowOverAirfoil():
-    
-    def __init__(self, caseName, xRange, yRange, AoA = 0.0):
+class FlowOverAirfoil:
+    def __init__(self, caseName: str, xRange: Tuple[float, float], yRange: Tuple[float, float], AoA: float = 0.0):
+        """
+        Initialize FlowOverAirfoil simulation.
+        
+        Args:
+            caseName: Name of the simulation case
+            xRange: Tuple of (min_x, max_x) domain bounds
+            yRange: Tuple of (min_y, max_y) domain bounds
+            AoA: Angle of attack in degrees
+        """
+        if not isinstance(caseName, str):
+            raise TypeError("caseName must be a string")
+        if not all(isinstance(x, (int, float)) for x in [*xRange, *yRange, AoA]):
+            raise TypeError("xRange, yRange and AoA must be numeric")
+            
+        self.logger = logging.getLogger(__name__)
         self.is2D = True
-
         self.problemTag = caseName
-        self.mesh  = Mesh(self.is2D)
+        self.mesh = MeshIO(self.is2D)  # Use MeshIO instead of Mesh
         self.model = PINN(input_shape=2, output_shape=3, eq = self.problemTag, layers=[20,40,60,40,20])
 
         self.loss = None
@@ -54,53 +68,85 @@ class FlowOverAirfoil():
         
         return
     
-    def generateMesh(self, Nx=100, Ny=100, NBoundary=100, sampling_method='random'):
-        # Initialize boundaries
+    def generateMesh(self, Nx: int = 100, Ny: int = 100, NBoundary: int = 100, sampling_method: str = 'random'):
+        """
+        Generate mesh with angle of attack considerations.
+        
+        Args:
+            Nx: Number of points in x direction
+            Ny: Number of points in y direction
+            NBoundary: Number of boundary points
+            sampling_method: Method for sampling points ('random' or 'uniform')
+        """
+        try:
+            if not all(isinstance(x, int) and x > 0 for x in [Nx, Ny, NBoundary]):
+                raise ValueError("Nx, Ny, and NBoundary must be positive integers")
+            if sampling_method not in ['random', 'uniform']:
+                raise ValueError("sampling_method must be 'random' or 'uniform'")
+                
+            self._initialize_boundaries()
+            # Initialize boundaries
+            self._initialize_boundaries()
+            
+            # Calculate velocity components based on angle of attack
+            u_inf = np.cos(np.radians(self.AoA))
+            v_inf = np.sin(np.radians(self.AoA))
+            
+            # Set external boundaries with AoA consideration
+            self.mesh.setBoundary('top',
+                        np.linspace(self.xRange[0], self.xRange[1], NBoundary),
+                        np.full((NBoundary, 1), self.yRange[1], dtype=np.float32),
+                        u=np.full(NBoundary, u_inf), 
+                        v=np.full(NBoundary, v_inf))
+
+            self.mesh.setBoundary('bottom',
+                        np.linspace(self.xRange[0], self.xRange[1], NBoundary),
+                        np.full((NBoundary, 1), self.yRange[0], dtype=np.float32),
+                        u=np.full(NBoundary, u_inf), 
+                        v=np.full(NBoundary, v_inf))
+
+            self.mesh.setBoundary('Inlet',
+                        np.full((NBoundary, 1), self.xRange[0], dtype=np.float32),
+                        np.linspace(self.yRange[0], self.yRange[1], NBoundary),
+                        u=np.full(NBoundary, u_inf), 
+                        v=np.full(NBoundary, v_inf))
+
+            self.mesh.setBoundary('Outlet',
+                        np.full((NBoundary, 1), self.xRange[1], dtype=np.float32),
+                        np.linspace(self.yRange[0], self.yRange[1], NBoundary),
+                        u=np.full(NBoundary, u_inf), 
+                        v=np.full(NBoundary, v_inf))
+            
+            # Set airfoil boundary with no-slip condition
+            n_airfoil_points = len(self.xAirfoil)
+            self.mesh.setBoundary('Airfoil',
+                        self.xAirfoil,
+                        self.yAirfoil,
+                        u=np.zeros(n_airfoil_points),  # No-slip condition
+                        v=np.zeros(n_airfoil_points),  # No-slip condition
+                        interior=True)
+            
+            # Generate the mesh
+            self.mesh.generateMesh(
+                Nx=Nx,
+                Ny=Ny,
+                sampling_method=sampling_method
+            )
+        except Exception as e:
+            self.logger.error(f"Mesh generation failed: {str(e)}")
+            raise
+
+    def _initialize_boundaries(self):
+        """Initialize boundary dictionaries."""
         self.mesh.boundaries = {
             'Inlet': {'x': None, 'y': None, 'u': None, 'v': None, 'p': None},
             'Outlet': {'x': None, 'y': None, 'u': None, 'v': None, 'p': None},
             'bottom': {'x': None, 'y': None, 'u': None, 'v': None, 'p': None},
             'top': {'x': None, 'y': None, 'u': None, 'v': None, 'p': None}
         }
-
         self.mesh.interiorBoundaries = {
             'Airfoil': {'x': None, 'y': None, 'u': None, 'v': None, 'p': None}
         }
-        
-        self.mesh.setBoundary('top',
-                    np.linspace(self.xRange[0], self.xRange[1], NBoundary),
-                    np.full((NBoundary, 1), self.yRange[1], dtype=np.float32),
-                    u = np.ones(NBoundary), v = np.zeros(NBoundary))
-
-        self.mesh.setBoundary('bottom',
-                    np.linspace(self.xRange[0], self.xRange[1], NBoundary),
-                    np.full((NBoundary, 1), self.yRange[0], dtype=np.float32),
-                    u = np.ones(NBoundary), v = np.zeros(NBoundary))
-
-        self.mesh.setBoundary('Inlet',
-                    np.full((NBoundary, 1), self.xRange[0], dtype=np.float32),
-                    np.linspace(self.yRange[0], self.yRange[1], NBoundary),
-                    u = np.ones(NBoundary), v = np.zeros(NBoundary))
-
-        self.mesh.setBoundary('Outlet',
-                    np.full((NBoundary, 1), self.xRange[1], dtype=np.float32),
-                    np.linspace(self.yRange[0], self.yRange[1], NBoundary),
-                    u = np.ones(NBoundary), v = np.zeros(NBoundary))
-        
-        self.mesh.setBoundary('Airfoil',
-                    self.xAirfoil,
-                    self.yAirfoil,
-                    u = np.zeros(len(self.xAirfoil)), 
-                    v = np.zeros(len(self.yAirfoil)),
-                    interior=True)
-        
-        # Generate the mesh
-        self.mesh.generateMesh(
-            Nx=Nx,
-            Ny=Ny,
-            sampling_method=sampling_method
-        )
-        return
     
     def getLossFunction(self):
         self.loss = NavierStokesLoss(self.mesh, self.model)
@@ -109,20 +155,49 @@ class FlowOverAirfoil():
         self.getLossFunction()
         self.model.train(self.loss.loss_function, epochs=epochs, print_interval=print_interval,autosave_interval=autosaveInterval)
 
-    def predict(self):
-        X = (np.hstack((self.mesh.x.flatten()[:, None], self.mesh.y.flatten()[:, None])))
-        sol = self.model.predict(X)
+    def predict(self) -> None:
+        """Predict flow solution and generate plots."""
+        try:
+            X = (np.hstack((self.mesh.x.flatten()[:, None], self.mesh.y.flatten()[:, None])))
+            sol = self.model.predict(X)
 
-        self.mesh.solutions['u'] = sol[:, 0]
-        self.mesh.solutions['v'] = sol[:, 1]
-        self.mesh.solutions['p'] = sol[:, 2]
+            self.mesh.solutions['u'] = sol[:, 0]
+            self.mesh.solutions['v'] = sol[:, 1]
+            self.mesh.solutions['p'] = sol[:, 2]
 
-        self.generate_plots()  # Generate plots after prediction
+            self.generate_plots()
+            
+            # Write solution to Tecplot file
+            self.write_solution()
 
-        return
+            return
+        except Exception as e:
+            self.logger.error(f"Prediction failed: {str(e)}")
+            raise
+    
+    def write_solution(self, filename=None):
+        """Write the solution to a CSV format file."""
+        if filename is None:
+            filename = f"{self.problemTag}_AoA_{self.AoA:.1f}.csv"
+        elif not filename.endswith('.csv'):
+            filename += '.csv'
+        
+        try:
+            # Ensure solutions are properly shaped before writing
+            if any(key not in self.mesh.solutions for key in ['u', 'v', 'p']):
+                raise ValueError("Missing required solution components (u, v, p)")
+            
+            self.mesh.write_tecplot(filename)
+            
+        except Exception as e:
+            print(f"Error writing solution: {str(e)}")
+            raise
     
     def generate_plots(self):
         self.Plot = Plot(self.mesh)
 
     def plot(self, solkey = 'u', streamlines = False):
         self.Plot.scatterPlot(solkey)
+
+    def load_model(self):
+        self.model.load(self.problemTag)

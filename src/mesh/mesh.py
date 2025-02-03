@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.spatial import Delaunay
 import matplotlib.pyplot as plt  # Add this import at the top
+from typing import Dict, Optional, Union, Tuple
 
 class Mesh:
     def __init__(self, is2D: bool = True) -> None:
@@ -124,43 +125,68 @@ class Mesh:
             raise ValueError(f"Unsupported sampling method: {sampling_method}")
 
 
-    def _sampleRandomlyWithinBoundary(self, x_boundary, y_boundary, Nx, Ny, Nz):
-        Nt = Nx * Ny * Nz if not self.is2D else Nx * Ny
+    def _sampleRandomlyWithinBoundary(self, x_boundary: np.ndarray, y_boundary: np.ndarray,
+                                    Nx: int, Ny: int, Nz: Optional[int]) -> None:
+        """
+        Sample points randomly within boundary while avoiding interior boundaries.
+        
+        Args:
+            x_boundary: X coordinates of boundary points
+            y_boundary: Y coordinates of boundary points
+            Nx, Ny, Nz: Number of points in each direction
+            
+        Raises:
+            ValueError: If sampling fails or parameters are invalid
+        """
+        if np.any(np.isnan([x_boundary, y_boundary])):
+            raise ValueError("Boundary coordinates contain NaN values")
+            
+        max_attempts = 10  # Prevent infinite loops
+        attempt = 0
+        
+        while attempt < max_attempts:
+            try:
+                Nt = Nx * Ny * Nz if not self.is2D else Nx * Ny
 
-        # Create Delaunay triangulation for exterior boundary
-        exterior_points = np.column_stack((x_boundary, y_boundary))
-        exterior_triangulation = Delaunay(exterior_points)
-        
-        # Create Delaunay triangulation for interior boundaries if they exist
-        interior_triangulations = []
-        if self._interiorBoundaries:
-            for boundary_data in self._interiorBoundaries.values():
-                x_interior = np.array(boundary_data['x']).flatten()
-                y_interior = np.array(boundary_data['y']).flatten()
-                interior_points = np.column_stack((x_interior, y_interior))
-                interior_triangulations.append(Delaunay(interior_points))
-        
-        samples = []
-        while len(samples) < Nt:
-            # Generate random points
-            x_rand = np.random.uniform(np.min(x_boundary), np.max(x_boundary), size=Nt)
-            y_rand = np.random.uniform(np.min(y_boundary), np.max(y_boundary), size=Nt)
-            random_points = np.column_stack((x_rand, y_rand))
-            
-            # Check which points are inside exterior boundary
-            inside_exterior = exterior_triangulation.find_simplex(random_points) >= 0
-            
-            # Check which points are inside any interior boundary
-            inside_interior = np.zeros_like(inside_exterior, dtype=bool)
-            for interior_tri in interior_triangulations:
-                inside_interior = inside_interior | (interior_tri.find_simplex(random_points) >= 0)
-            
-            # Keep points that are inside exterior but outside all interior boundaries
-            valid_points = random_points[inside_exterior & ~inside_interior]
-            samples.extend(valid_points)
-        
-        samples = np.array(samples)[:Nt]  # Keep exactly Nt points
-        self._x, self._y = samples[:, 0].astype(np.float32), samples[:, 1].astype(np.float32)
+                # Create Delaunay triangulation for exterior boundary
+                exterior_points = np.column_stack((x_boundary, y_boundary))
+                exterior_triangulation = Delaunay(exterior_points)
+                
+                # Create Delaunay triangulation for interior boundaries if they exist
+                interior_triangulations = []
+                if self._interiorBoundaries:
+                    for boundary_data in self._interiorBoundaries.values():
+                        x_interior = np.array(boundary_data['x']).flatten()
+                        y_interior = np.array(boundary_data['y']).flatten()
+                        interior_points = np.column_stack((x_interior, y_interior))
+                        interior_triangulations.append(Delaunay(interior_points))
+                
+                samples = []
+                while len(samples) < Nt:
+                    # Generate random points
+                    x_rand = np.random.uniform(np.min(x_boundary), np.max(x_boundary), size=Nt)
+                    y_rand = np.random.uniform(np.min(y_boundary), np.max(y_boundary), size=Nt)
+                    random_points = np.column_stack((x_rand, y_rand))
+                    
+                    # Check which points are inside exterior boundary
+                    inside_exterior = exterior_triangulation.find_simplex(random_points) >= 0
+                    
+                    # Check which points are inside any interior boundary
+                    inside_interior = np.zeros_like(inside_exterior, dtype=bool)
+                    for interior_tri in interior_triangulations:
+                        inside_interior = inside_interior | (interior_tri.find_simplex(random_points) >= 0)
+                    
+                    # Keep points that are inside exterior but outside all interior boundaries
+                    valid_points = random_points[inside_exterior & ~inside_interior]
+                    samples.extend(valid_points)
+                
+                samples = np.array(samples)[:Nt]  # Keep exactly Nt points
+                self._x, self._y = samples[:, 0].astype(np.float32), samples[:, 1].astype(np.float32)
+                break
+            except Exception as e:
+                attempt += 1
+                if attempt == max_attempts:
+                    raise ValueError(f"Failed to sample points after {max_attempts} attempts: {str(e)}")
 
     def _sampleUniformlyWithinBoundary(self, x_boundary, y_boundary, Nx, Ny, Nz):
         # Create a regular grid and keep points inside the boundary
@@ -234,12 +260,17 @@ class Mesh:
         # Set type flag
         boundary_dict[boundaryName]['isInterior'] = interior
 
-    def showMesh(self):
+    def showMesh(self, figsize: Tuple[int, int] = (8, 6)) -> None:
         """
-        Visualize the mesh points and boundaries.
-        Shows interior boundaries in red and exterior boundaries in blue.
+        Visualize the mesh with customizable figure size.
+        
+        Args:
+            figsize: Tuple of (width, height) for the figure
         """
-        plt.figure(figsize=(8, 6))
+        if self.x is None or self.y is None:
+            raise ValueError("Mesh has not been generated yet")
+            
+        plt.figure(figsize=figsize)
         plt.title('Mesh Visualization')
         
         # Plot mesh points
