@@ -107,36 +107,41 @@ class Mesh:
             raise ValueError(f"Mesh generation failed: {str(e)}")
         
     def _generateMeshFromBoundary(self, sampling_method, Nx, Ny, Nz):
-        # Validate boundaries
+        # Validate boundaries and print their content
         for boundary_name, boundary_data in self.boundaries.items():
             if 'x' not in boundary_data or 'y' not in boundary_data:
                 raise ValueError(f"Boundary '{boundary_name}' must contain 'x' and 'y' coordinates.")
+            if not self.is2D and 'z' not in boundary_data:
+                raise ValueError(f"3D mesh requires z coordinate for boundary {boundary_name}")
 
         # Convert and combine boundary coordinates
-        x_boundary = np.concatenate([np.asarray(boundary_data['x'], dtype=np.float32).flatten() 
-                                   for boundary_data in self.boundaries.values()])
-        y_boundary = np.concatenate([np.asarray(boundary_data['y'], dtype=np.float32).flatten() 
-                                   for boundary_data in self.boundaries.values()])
-        
-        # Handle z coordinates for 3D case
-        if not self.is2D and Nz is not None:
-            z_boundaries = [boundary_data.get('z') for boundary_data in self.boundaries.values()]
-            if any(z is None for z in z_boundaries):
-                raise ValueError("3D mesh requires z coordinates for all boundaries")
-            z_boundary = np.concatenate([np.asarray(z, dtype=np.float32).flatten() 
-                                       for z in z_boundaries])
-        else:
-            z_boundary = None
+        try:
+            x_boundary = np.concatenate([np.asarray(boundary_data['x'], dtype=np.float32).flatten() 
+                                    for boundary_data in self.boundaries.values()])
+            y_boundary = np.concatenate([np.asarray(boundary_data['y'], dtype=np.float32).flatten() 
+                                    for boundary_data in self.boundaries.values()])
+            
+            # Handle z coordinates for 3D case
+            if not self.is2D:
+                z_boundary = np.concatenate([np.asarray(boundary_data['z'], dtype=np.float32).flatten() 
+                                        for boundary_data in self.boundaries.values()])
+            else:
+                z_boundary = None
+                
+        except Exception as e:
+            print(f"Debug: Error during boundary concatenation: {str(e)}")
+            raise
 
-        # Sampling logic
         if sampling_method == 'random':
-            self._sampleRandomlyWithinBoundary(x_boundary, y_boundary, Nx, Ny, Nz)
+            self._sampleRandomlyWithinBoundary(x_boundary, y_boundary, z_boundary if not self.is2D else None, 
+                                             Nx, Ny, Nz)
         elif sampling_method == 'uniform':
-            self._sampleUniformlyWithinBoundary(x_boundary, y_boundary, Nx, Ny, Nz)
+            self._sampleUniformlyWithinBoundary(x_boundary, y_boundary, z_boundary if not self.is2D else None,
+                                              Nx, Ny, Nz)
         else:
             raise ValueError(f"Unsupported sampling method: {sampling_method}")
 
-    def _sampleRandomlyWithinBoundary(self, x_boundary: np.ndarray, y_boundary: np.ndarray,
+    def _sampleRandomlyWithinBoundary(self, x_boundary: np.ndarray, y_boundary: np.ndarray, z_boundary: Optional[np.ndarray],
                                     Nx: int, Ny: int, Nz: Optional[int]) -> None:
         """
         Sample points randomly within boundary while avoiding interior boundaries.
@@ -144,84 +149,90 @@ class Mesh:
         Args:
             x_boundary: X coordinates of boundary points
             y_boundary: Y coordinates of boundary points
+            z_boundary: Z coordinates of boundary points (3D only)
             Nx, Ny, Nz: Number of points in each direction
             
         Raises:
             ValueError: If sampling fails or parameters are invalid
         """
-        # Convert inputs to numpy arrays and check for NaN values
-        x_boundary = np.asarray(x_boundary, dtype=np.float32)
-        y_boundary = np.asarray(y_boundary, dtype=np.float32)
-        
-        if np.any(np.isnan(x_boundary)) or np.any(np.isnan(y_boundary)):
-            raise ValueError("Boundary coordinates contain NaN values")
+        try:
+            # Convert inputs to numpy arrays and check for NaN values
+            x_boundary = np.asarray(x_boundary, dtype=np.float32)
+            y_boundary = np.asarray(y_boundary, dtype=np.float32)
+
+            if np.any(np.isnan(x_boundary)) or np.any(np.isnan(y_boundary)):
+                raise ValueError("Boundary coordinates contain NaN values")
+                
+            max_attempts = 10  # Prevent infinite loops
+            attempt = 0
             
-        max_attempts = 10  # Prevent infinite loops
-        attempt = 0
-        
-        while attempt < max_attempts:
-            try:
-                Nt = Nx * Ny * (Nz if not self.is2D and Nz is not None else 1)
+            while attempt < max_attempts:
+                try:
+                    Nt = Nx * Ny 
 
-                # Create Delaunay triangulation for exterior boundary
-                exterior_points = np.column_stack((x_boundary, y_boundary))
-                exterior_triangulation = Delaunay(exterior_points)
-                
-                # Create Delaunay triangulation for interior boundaries if they exist
-                interior_triangulations = []
-                if self._interiorBoundaries:
-                    for boundary_data in self._interiorBoundaries.values():
-                        x_interior = np.asarray(boundary_data['x'], dtype=np.float32).flatten()
-                        y_interior = np.asarray(boundary_data['y'], dtype=np.float32).flatten()
-                        interior_points = np.column_stack((x_interior, y_interior))
-                        interior_triangulations.append(Delaunay(interior_points))
-                
-                samples = []
-                while len(samples) < Nt:
-                    # Generate random points
-                    x_rand = np.random.uniform(np.min(x_boundary), np.max(x_boundary), size=Nt)
-                    y_rand = np.random.uniform(np.min(y_boundary), np.max(y_boundary), size=Nt)
-                    random_points = np.column_stack((x_rand, y_rand))
+                    # Create Delaunay triangulation for exterior boundary
+                    exterior_points = np.column_stack((x_boundary, y_boundary)) 
+                    exterior_triangulation = Delaunay(exterior_points)
                     
-                    # Check which points are inside exterior boundary
-                    inside_exterior = exterior_triangulation.find_simplex(random_points) >= 0
+                    # Create Delaunay triangulation for interior boundaries if they exist
+                    interior_triangulations = []
+                    if self._interiorBoundaries:
+                        for boundary_data in self._interiorBoundaries.values():
+                            x_interior = np.asarray(boundary_data['x'], dtype=np.float32).flatten()
+                            y_interior = np.asarray(boundary_data['y'], dtype=np.float32).flatten()
+                            interior_points = np.column_stack((x_interior, y_interior))
+                            interior_triangulations.append(Delaunay(interior_points))
                     
-                    # Check which points are inside any interior boundary
-                    inside_interior = np.zeros_like(inside_exterior, dtype=bool)
-                    for interior_tri in interior_triangulations:
-                        inside_interior = inside_interior | (interior_tri.find_simplex(random_points) >= 0)
+                    samples = []
+                    while len(samples) < Nt:
+                        # Generate random points
+                        x_rand = np.random.uniform(np.min(x_boundary), np.max(x_boundary), size=Nt)
+                        y_rand = np.random.uniform(np.min(y_boundary), np.max(y_boundary), size=Nt)
+                        random_points = np.column_stack((x_rand, y_rand))
+                        
+                        # Check which points are inside exterior boundary
+                        inside_exterior = exterior_triangulation.find_simplex(random_points) >= 0
+                        
+                        # Check which points are inside any interior boundary
+                        inside_interior = np.zeros_like(inside_exterior, dtype=bool)
+                        for interior_tri in interior_triangulations:
+                            inside_interior = inside_interior | (interior_tri.find_simplex(random_points) >= 0)
+                        
+                        # Keep points that are inside exterior but outside all interior boundaries
+                        valid_points = random_points[inside_exterior & ~inside_interior]
+                        samples.extend(valid_points)
                     
-                    # Keep points that are inside exterior but outside all interior boundaries
-                    valid_points = random_points[inside_exterior & ~inside_interior]
-                    samples.extend(valid_points)
-                
-                samples = np.array(samples)[:Nt]  # Keep exactly Nt points
-                self._x, self._y = samples[:, 0].astype(np.float32), samples[:, 1].astype(np.float32)
-                break
-            except Exception as e:
-                attempt += 1
-                if attempt == max_attempts:
-                    raise ValueError(f"Failed to sample points after {max_attempts} attempts: {str(e)}")
+                    samples = np.array(samples)[:Nt]  # Keep exactly Nt points
+                    self._x, self._y = samples[:, 0].astype(np.float32), samples[:, 1].astype(np.float32)
+                    break
+                except Exception as e:
+                    attempt += 1
+                    if attempt == max_attempts:
+                        raise ValueError(f"Failed to sample points after {max_attempts} attempts: {str(e)}")
+        except Exception as e:
+            print(f"Debug: Error during random sampling: {str(e)}")
+            raise
 
-    def _sampleUniformlyWithinBoundary(self, x_boundary, y_boundary, Nx, Ny, Nz):
+    def _sampleUniformlyWithinBoundary(self, x_boundary, y_boundary, z_boundary, Nx, Ny, Nz):
         # Create a regular grid and keep points inside the boundary
         x_min, x_max = np.min(x_boundary), np.max(x_boundary)
         y_min, y_max = np.min(y_boundary), np.max(y_boundary)
+        z_min, z_max = np.min(z_boundary), np.max(z_boundary) if z_boundary is not None else (None, None)
 
-        x_grid, y_grid = np.meshgrid(
-            np.linspace(x_min, x_max, Nx), np.linspace(y_min, y_max, Ny)
+        x_grid, y_grid, z_grid = np.meshgrid(
+            np.linspace(x_min, x_max, Nx), np.linspace(y_min, y_max, Ny), np.linspace(z_min, z_max, Nz) if z_boundary is not None else [0]
         )
-        grid_points = np.column_stack((x_grid.flatten(), y_grid.flatten()))
+        grid_points = np.column_stack((x_grid.flatten(), y_grid.flatten(), z_grid.flatten())) if not self.is2D else np.column_stack((x_grid.flatten(), y_grid.flatten()))
         
         # Create a Delaunay triangulation
-        points = np.column_stack((x_boundary, y_boundary))
+        points = np.column_stack((x_boundary, y_boundary, z_boundary)) if not self.is2D else np.column_stack((x_boundary, y_boundary))
         triangulation = Delaunay(points)
         
         # Check which grid points are inside the triangulation
         inside = triangulation.find_simplex(grid_points) >= 0
         inside_points = grid_points[inside]
         
-        self._x, self._y = inside_points[:, 0].astype(np.float32), inside_points[:, 1].astype(np.float32)
+        self._x, self._y, self._z = inside_points[:, 0].astype(np.float32), inside_points[:, 1].astype(np.float32), inside_points[:, 2].astype(np.float32)
 
 
     def setBoundary(self, boundary_name, xBc, yBc, interior=False, **boundary_conditions):
@@ -239,38 +250,26 @@ class Mesh:
             self.setBoundaryCondition(xBc, yBc, values, var_name, boundary_name, interior=interior)
 
     def setBoundaryCondition(self, xCoord, yCoord, value, varName, boundaryName, zCoord=None, interior=False):
-        """
-        Set boundary conditions for either exterior or interior boundaries.
-        
-        Parameters:
-        - xCoord: x coordinates of the boundary
-        - yCoord: y coordinates of the boundary
-        - value: boundary condition value
-        - varName: variable name for the boundary condition
-        - boundaryName: name of the boundary
-        - zCoord: z coordinates (optional, for 3D)
-        - interior: boolean flag to indicate if this is an interior boundary
-        """
+        """Set boundary conditions for either exterior or interior boundaries."""
         # Select appropriate boundary dictionary
         boundary_dict = self._interiorBoundaries if interior else self._boundaries
         
         # Initialize boundary if it doesn't exist
         if boundaryName not in boundary_dict:
             boundary_dict[boundaryName] = {}
-            
-        # Initialize variable if it doesn't exist
-        if varName not in boundary_dict[boundaryName]:
-            boundary_dict[boundaryName][varName] = {}
-            
-        # Set coordinates
-        boundary_dict[boundaryName]['x'] = xCoord
-        boundary_dict[boundaryName]['y'] = yCoord
         
-        if not self.is2D and zCoord is not None:
-            boundary_dict[boundaryName]['z'] = zCoord
-            
-        # Set boundary condition value
-        boundary_dict[boundaryName][varName] = value
+        # Set coordinates
+        boundary_dict[boundaryName]['x'] = np.asarray(xCoord, dtype=np.float32)
+        boundary_dict[boundaryName]['y'] = np.asarray(yCoord, dtype=np.float32)
+        
+        if not self.is2D:
+            if zCoord is None:
+                raise ValueError(f"z coordinate required for 3D mesh in boundary {boundaryName}")
+            boundary_dict[boundaryName]['z'] = np.asarray(zCoord, dtype=np.float32)
+        
+        # Set boundary condition value if provided
+        if value is not None:
+            boundary_dict[boundaryName][varName] = np.asarray(value, dtype=np.float32)
         
         # Set type flag
         boundary_dict[boundaryName]['isInterior'] = interior
@@ -289,24 +288,51 @@ class Mesh:
         plt.title('Mesh Visualization')
         
         # Plot mesh points
-        plt.scatter(self.x, self.y, c='black', s=1, alpha=0.5, label='Mesh Points')
+        if not self.is2D and self.z is not None:
+            from mpl_toolkits.mplot3d import Axes3D
+            ax = plt.axes(projection='3d')
+            scatter = ax.scatter(self.x, self.y, self.z, 
+                               c='black', 
+                               s=1, 
+                               alpha=0.5, 
+                               label='Mesh Points')
+            ax.set_zlabel('Z')
+        else:
+            scatter = plt.scatter(self.x, self.y, 
+                                c='black', 
+                                s=1, 
+                                alpha=0.5, 
+                                label='Mesh Points')
         
         # Plot exterior boundaries
         for boundary_data in self.boundaries.values():
             x_boundary = boundary_data['x']
             y_boundary = boundary_data['y']
-            plt.plot(x_boundary, y_boundary, 'b-', linewidth=2, label='Exterior Boundary')
+            if not self.is2D and 'z' in boundary_data:
+                z_boundary = boundary_data['z']
+                ax.plot3D(x_boundary, y_boundary, z_boundary, 
+                         'b-', linewidth=2, label='Exterior Boundary')
+            else:
+                plt.plot(x_boundary, y_boundary, 
+                        'b-', linewidth=2, label='Exterior Boundary')
         
         # Plot interior boundaries if they exist
         if self.interiorBoundaries:
             for boundary_data in self.interiorBoundaries.values():
                 x_boundary = boundary_data['x']
                 y_boundary = boundary_data['y']
-                plt.plot(x_boundary, y_boundary, 'r-', linewidth=2, label='Interior Boundary')
+                if not self.is2D and 'z' in boundary_data:
+                    z_boundary = boundary_data['z']
+                    ax.plot3D(x_boundary, y_boundary, z_boundary, 
+                             'r-', linewidth=2, label='Interior Boundary')
+                else:
+                    plt.plot(x_boundary, y_boundary, 
+                            'r-', linewidth=2, label='Interior Boundary')
         
         plt.xlabel('X')
         plt.ylabel('Y')
-        plt.axis('equal')
+        if self.is2D:
+            plt.axis('equal')
         
         # Remove duplicate labels
         handles, labels = plt.gca().get_legend_handles_labels()
