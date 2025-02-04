@@ -102,19 +102,24 @@ class Mesh:
             raise ValueError("No boundaries defined. Use setBoundary() to define boundaries before generating mesh")
 
         try:
-            self._generateMeshFromBoundary(sampling_method, Nx, Ny, Nz)
+            if self.is2D:
+                self._generate2DMeshFromBoundary(sampling_method, Nx, Ny, None)
+            else:
+                self._generate3DMeshFromBoundary(sampling_method, Nx, Ny, Nz)
         except Exception as e:
             raise ValueError(f"Mesh generation failed: {str(e)}")
         
-    def _generateMeshFromBoundary(self, sampling_method, Nx, Ny, Nz):
+    def _generate2DMeshFromBoundary(self, sampling_method, Nx, Ny):
         # Validate that all boundaries contain 'x' and 'y' coordinates
         for boundary_name, boundary_data in self.boundaries.items():
             if 'x' not in boundary_data or 'y' not in boundary_data:
                 raise ValueError(f"Boundary '{boundary_name}' must contain 'x' and 'y' coordinates.")
 
-        # Combine boundary coordinates into a single array for validation
-        x_boundary = np.concatenate([np.array(boundary_data['x']).flatten() for boundary_data in self.boundaries.values()])
-        y_boundary = np.concatenate([np.array(boundary_data['y']).flatten() for boundary_data in self.boundaries.values()])
+        # Convert and combine boundary coordinates into numpy arrays
+        x_boundary = np.concatenate([np.asarray(boundary_data['x'], dtype=np.float32).flatten() 
+                                   for boundary_data in self.boundaries.values()])
+        y_boundary = np.concatenate([np.asarray(boundary_data['y'], dtype=np.float32).flatten() 
+                                   for boundary_data in self.boundaries.values()])
 
         # Sampling logic
         if sampling_method == 'random':
@@ -123,7 +128,6 @@ class Mesh:
             self._sampleUniformlyWithinBoundary(x_boundary, y_boundary, Nx, Ny, Nz)
         else:
             raise ValueError(f"Unsupported sampling method: {sampling_method}")
-
 
     def _sampleRandomlyWithinBoundary(self, x_boundary: np.ndarray, y_boundary: np.ndarray,
                                     Nx: int, Ny: int, Nz: Optional[int]) -> None:
@@ -138,7 +142,11 @@ class Mesh:
         Raises:
             ValueError: If sampling fails or parameters are invalid
         """
-        if np.any(np.isnan([x_boundary, y_boundary])):
+        # Convert inputs to numpy arrays and check for NaN values
+        x_boundary = np.asarray(x_boundary, dtype=np.float32)
+        y_boundary = np.asarray(y_boundary, dtype=np.float32)
+        
+        if np.any(np.isnan(x_boundary)) or np.any(np.isnan(y_boundary)):
             raise ValueError("Boundary coordinates contain NaN values")
             
         max_attempts = 10  # Prevent infinite loops
@@ -146,7 +154,7 @@ class Mesh:
         
         while attempt < max_attempts:
             try:
-                Nt = Nx * Ny * Nz if not self.is2D else Nx * Ny
+                Nt = Nx * Ny * (Nz if not self.is2D and Nz is not None else 1)
 
                 # Create Delaunay triangulation for exterior boundary
                 exterior_points = np.column_stack((x_boundary, y_boundary))
@@ -156,8 +164,8 @@ class Mesh:
                 interior_triangulations = []
                 if self._interiorBoundaries:
                     for boundary_data in self._interiorBoundaries.values():
-                        x_interior = np.array(boundary_data['x']).flatten()
-                        y_interior = np.array(boundary_data['y']).flatten()
+                        x_interior = np.asarray(boundary_data['x'], dtype=np.float32).flatten()
+                        y_interior = np.asarray(boundary_data['y'], dtype=np.float32).flatten()
                         interior_points = np.column_stack((x_interior, y_interior))
                         interior_triangulations.append(Delaunay(interior_points))
                 
