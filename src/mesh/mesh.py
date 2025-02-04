@@ -297,69 +297,73 @@ class Mesh:
         boundary_dict[boundaryName]['isInterior'] = interior
 
     def showMesh(self, figsize: Tuple[int, int] = (8, 6)) -> None:
-        """
-        Visualize the mesh with customizable figure size.
-        
-        Args:
-            figsize: Tuple of (width, height) for the figure
-        """
+        """Visualize the mesh with proper dimensional scaling."""
         if self.x is None or self.y is None:
             raise ValueError("Mesh has not been generated yet")
             
-        plt.figure(figsize=figsize)
-        plt.title('Mesh Visualization')
+        # Calculate domain dimensions
+        x_min, x_max = np.min(self.x), np.max(self.x)
+        y_min, y_max = np.min(self.y), np.max(self.y)
         
-        # Plot mesh points
         if not self.is2D and self.z is not None:
-            from mpl_toolkits.mplot3d import Axes3D
-            ax = plt.axes(projection='3d')
+            z_min, z_max = np.min(self.z), np.max(self.z)
+            domain_size = f"L×H×W: {x_max-x_min:.1f}×{y_max-y_min:.1f}×{z_max-z_min:.1f}"
+            
+            fig = plt.figure(figsize=figsize)
+            ax = fig.add_subplot(111, projection='3d')
+            
+            # Set equal scaling for all axes
+            x_range = x_max - x_min
+            y_range = y_max - y_min
+            z_range = z_max - z_min
+            max_range = max(x_range, y_range, z_range)
+            
+            x_mid = (x_max + x_min) / 2
+            y_mid = (y_max + y_min) / 2
+            z_mid = (z_max + z_min) / 2
+            
+            # Set limits to maintain proper scaling
+            ax.set_xlim(x_mid - max_range/2, x_mid + max_range/2)
+            ax.set_ylim(y_mid - max_range/2, y_mid + max_range/2)
+            ax.set_zlim(z_mid - max_range/2, z_mid + max_range/2)
+            
+            # Plot mesh points
             scatter = ax.scatter(self.x, self.y, self.z, 
-                               c='black', 
-                               s=1, 
-                               alpha=0.5, 
-                               label='Mesh Points')
-            ax.set_zlabel('Z')
-        else:
-            scatter = plt.scatter(self.x, self.y, 
-                                c='black', 
-                                s=1, 
-                                alpha=0.5, 
-                                label='Mesh Points')
-        
-        # Plot exterior boundaries
-        for boundary_data in self.boundaries.values():
-            x_boundary = boundary_data['x']
-            y_boundary = boundary_data['y']
-            if not self.is2D and 'z' in boundary_data:
-                z_boundary = boundary_data['z']
-                ax.plot3D(x_boundary, y_boundary, z_boundary, 
-                         'b-', linewidth=2, label='Exterior Boundary')
-            else:
-                plt.plot(x_boundary, y_boundary, 
-                        'b-', linewidth=2, label='Exterior Boundary')
-        
-        # Plot interior boundaries if they exist
-        if self.interiorBoundaries:
-            for boundary_data in self.interiorBoundaries.values():
+                               c='black', s=1, alpha=0.5)
+            
+            # Plot boundaries
+            for boundary_data in self.boundaries.values():
                 x_boundary = boundary_data['x']
                 y_boundary = boundary_data['y']
-                if not self.is2D and 'z' in boundary_data:
-                    z_boundary = boundary_data['z']
-                    ax.plot3D(x_boundary, y_boundary, z_boundary, 
-                             'r-', linewidth=2, label='Interior Boundary')
-                else:
-                    plt.plot(x_boundary, y_boundary, 
-                            'r-', linewidth=2, label='Interior Boundary')
-        
-        plt.xlabel('X')
-        plt.ylabel('Y')
-        if self.is2D:
+                z_boundary = boundary_data['z']
+                ax.plot3D(x_boundary, y_boundary, z_boundary, 
+                         'b-', linewidth=1, alpha=0.5)
+            
+            ax.set_xlabel(f'X')
+            ax.set_ylabel(f'Y')
+            ax.set_zlabel(f'Z')
+            
+            # Set aspect ratio to be equal
+            ax.set_box_aspect([x_range/max_range, 
+                             y_range/max_range, 
+                             z_range/max_range])
+            
+        else:
+            plt.figure(figsize=figsize)
+            domain_size = f"L×H: {x_max-x_min:.1f}×{y_max-y_min:.1f}"
+            
+            # Plot mesh points
+            plt.scatter(self.x, self.y, c='black', s=1, alpha=0.5)
+            
+            # Plot boundaries
+            for boundary_data in self.boundaries.values():
+                plt.plot(boundary_data['x'], boundary_data['y'], 
+                        'b-', linewidth=1, alpha=0.5)
+            
+            plt.xlabel(f'X ({x_max-x_min:.1f})')
+            plt.ylabel(f'Y ({y_max-y_min:.1f})')
             plt.axis('equal')
         
-        # Remove duplicate labels
-        handles, labels = plt.gca().get_legend_handles_labels()
-        by_label = dict(zip(labels, handles))
-        plt.legend(by_label.values(), by_label.keys())
-        
+        plt.title(f'Mesh Visualization\n{domain_size}')
         plt.tight_layout()
         plt.show()
