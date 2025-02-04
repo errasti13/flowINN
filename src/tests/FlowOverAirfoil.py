@@ -69,22 +69,13 @@ class FlowOverAirfoil:
         return
     
     def generateMesh(self, Nx: int = 100, Ny: int = 100, NBoundary: int = 100, sampling_method: str = 'random'):
-        """
-        Generate mesh with angle of attack considerations.
-        
-        Args:
-            Nx: Number of points in x direction
-            Ny: Number of points in y direction
-            NBoundary: Number of boundary points
-            sampling_method: Method for sampling points ('random' or 'uniform')
-        """
+        """Generate mesh with angle of attack considerations."""
         try:
             if not all(isinstance(x, int) and x > 0 for x in [Nx, Ny, NBoundary]):
                 raise ValueError("Nx, Ny, and NBoundary must be positive integers")
             if sampling_method not in ['random', 'uniform']:
                 raise ValueError("sampling_method must be 'random' or 'uniform'")
                 
-            self._initialize_boundaries()
             # Initialize boundaries
             self._initialize_boundaries()
             
@@ -92,39 +83,50 @@ class FlowOverAirfoil:
             u_inf = np.cos(np.radians(self.AoA))
             v_inf = np.sin(np.radians(self.AoA))
             
+            # Create boundary points
+            x_top = np.linspace(self.xRange[0], self.xRange[1], NBoundary)
+            y_top = np.full(NBoundary, self.yRange[1])
+            
+            x_bottom = np.linspace(self.xRange[0], self.xRange[1], NBoundary)
+            y_bottom = np.full(NBoundary, self.yRange[0])
+            
+            x_inlet = np.full(NBoundary, self.xRange[0])
+            y_inlet = np.linspace(self.yRange[0], self.yRange[1], NBoundary)
+            
+            x_outlet = np.full(NBoundary, self.xRange[1])
+            y_outlet = np.linspace(self.yRange[0], self.yRange[1], NBoundary)
+            
             # Set external boundaries with AoA consideration
-            self.mesh.setBoundary('top',
-                        np.linspace(self.xRange[0], self.xRange[1], NBoundary),
-                        np.full((NBoundary, 1), self.yRange[1], dtype=np.float32),
-                        u=np.full(NBoundary, u_inf), 
-                        v=np.full(NBoundary, v_inf))
-
-            self.mesh.setBoundary('bottom',
-                        np.linspace(self.xRange[0], self.xRange[1], NBoundary),
-                        np.full((NBoundary, 1), self.yRange[0], dtype=np.float32),
-                        u=np.full(NBoundary, u_inf), 
-                        v=np.full(NBoundary, v_inf))
-
-            self.mesh.setBoundary('Inlet',
-                        np.full((NBoundary, 1), self.xRange[0], dtype=np.float32),
-                        np.linspace(self.yRange[0], self.yRange[1], NBoundary),
-                        u=np.full(NBoundary, u_inf), 
-                        v=np.full(NBoundary, v_inf))
-
-            self.mesh.setBoundary('Outlet',
-                        np.full((NBoundary, 1), self.xRange[1], dtype=np.float32),
-                        np.linspace(self.yRange[0], self.yRange[1], NBoundary),
-                        u=np.full(NBoundary, u_inf), 
-                        v=np.full(NBoundary, v_inf))
+            self.mesh.setBoundaryCondition(x_top, y_top, np.full(NBoundary, u_inf), 'u', 'top')
+            self.mesh.setBoundaryCondition(x_top, y_top, np.full(NBoundary, v_inf), 'v', 'top')
+            
+            self.mesh.setBoundaryCondition(x_bottom, y_bottom, np.full(NBoundary, u_inf), 'u', 'bottom')
+            self.mesh.setBoundaryCondition(x_bottom, y_bottom, np.full(NBoundary, v_inf), 'v', 'bottom')
+            
+            self.mesh.setBoundaryCondition(x_inlet, y_inlet, np.full(NBoundary, u_inf), 'u', 'Inlet')
+            self.mesh.setBoundaryCondition(x_inlet, y_inlet, np.full(NBoundary, v_inf), 'v', 'Inlet')
+            
+            self.mesh.setBoundaryCondition(x_outlet, y_outlet, np.full(NBoundary, u_inf), 'u', 'Outlet')
+            self.mesh.setBoundaryCondition(x_outlet, y_outlet, np.full(NBoundary, v_inf), 'v', 'Outlet')
             
             # Set airfoil boundary with no-slip condition
             n_airfoil_points = len(self.xAirfoil)
-            self.mesh.setBoundary('Airfoil',
-                        self.xAirfoil,
-                        self.yAirfoil,
-                        u=np.zeros(n_airfoil_points),  # No-slip condition
-                        v=np.zeros(n_airfoil_points),  # No-slip condition
-                        interior=True)
+            self.mesh.setBoundaryCondition(
+                self.xAirfoil.flatten(),
+                self.yAirfoil.flatten(),
+                np.zeros(n_airfoil_points),
+                'u',
+                'Airfoil',
+                interior=True
+            )
+            self.mesh.setBoundaryCondition(
+                self.xAirfoil.flatten(),
+                self.yAirfoil.flatten(),
+                np.zeros(n_airfoil_points),
+                'v',
+                'Airfoil',
+                interior=True
+            )
             
             # Generate the mesh
             self.mesh.generateMesh(
@@ -132,6 +134,7 @@ class FlowOverAirfoil:
                 Ny=Ny,
                 sampling_method=sampling_method
             )
+            
         except Exception as e:
             self.logger.error(f"Mesh generation failed: {str(e)}")
             raise
