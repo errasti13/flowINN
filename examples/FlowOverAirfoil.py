@@ -7,7 +7,7 @@ def main():
     angle_of_attack = 5.0  # degrees
     
     # Simulation parameters
-    case_name = "NACA0012"
+    case_name = "FlowOverAirfoil"
     epochs = 20000
     print_interval = 100
     autosave_interval = 5000
@@ -16,6 +16,8 @@ def main():
     nx = 40
     ny = 40
     n_boundary = 100
+
+    trainedModel = True
     
     try:
         # Initialize simulation
@@ -26,10 +28,14 @@ def main():
         airfoil.generateMesh(Nx=nx, Ny=ny, NBoundary=n_boundary, sampling_method='random')
         
         # Train the model
-        print("Starting training...")
-        airfoil.train(epochs=epochs, 
-                     print_interval=print_interval,
-                     autosaveInterval=autosave_interval)
+        if trainedModel:
+            print("Loading pre-trained model...")
+            airfoil.load_model()
+        else:
+            print("Starting training...")
+            airfoil.train(epochs=epochs, 
+                        print_interval=print_interval,
+                        autosaveInterval=autosave_interval)
         
         # Predict and visualize
         print("Predicting flow field...")
