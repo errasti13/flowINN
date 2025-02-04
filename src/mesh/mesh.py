@@ -143,74 +143,96 @@ class Mesh:
 
     def _sampleRandomlyWithinBoundary(self, x_boundary: np.ndarray, y_boundary: np.ndarray, z_boundary: Optional[np.ndarray],
                                     Nx: int, Ny: int, Nz: Optional[int]) -> None:
-        """
-        Sample points randomly within boundary while avoiding interior boundaries.
-        
-        Args:
-            x_boundary: X coordinates of boundary points
-            y_boundary: Y coordinates of boundary points
-            z_boundary: Z coordinates of boundary points (3D only)
-            Nx, Ny, Nz: Number of points in each direction
-            
-        Raises:
-            ValueError: If sampling fails or parameters are invalid
-        """
+        """Sample points randomly within boundary."""
         try:
-            # Convert inputs to numpy arrays and check for NaN values
+            # Convert inputs to numpy arrays
             x_boundary = np.asarray(x_boundary, dtype=np.float32)
             y_boundary = np.asarray(y_boundary, dtype=np.float32)
+            if z_boundary is not None:
+                z_boundary = np.asarray(z_boundary, dtype=np.float32)
 
-            if np.any(np.isnan(x_boundary)) or np.any(np.isnan(y_boundary)):
+            # Check for NaN values
+            if np.any(np.isnan(x_boundary)) or np.any(np.isnan(y_boundary)) or \
+               (z_boundary is not None and np.any(np.isnan(z_boundary))):
                 raise ValueError("Boundary coordinates contain NaN values")
-                
-            max_attempts = 10  # Prevent infinite loops
-            attempt = 0
-            
-            while attempt < max_attempts:
-                try:
-                    Nt = Nx * Ny 
 
-                    # Create Delaunay triangulation for exterior boundary
-                    exterior_points = np.column_stack((x_boundary, y_boundary)) 
-                    exterior_triangulation = Delaunay(exterior_points)
-                    
-                    # Create Delaunay triangulation for interior boundaries if they exist
-                    interior_triangulations = []
-                    if self._interiorBoundaries:
-                        for boundary_data in self._interiorBoundaries.values():
-                            x_interior = np.asarray(boundary_data['x'], dtype=np.float32).flatten()
-                            y_interior = np.asarray(boundary_data['y'], dtype=np.float32).flatten()
-                            interior_points = np.column_stack((x_interior, y_interior))
-                            interior_triangulations.append(Delaunay(interior_points))
-                    
-                    samples = []
-                    while len(samples) < Nt:
-                        # Generate random points
-                        x_rand = np.random.uniform(np.min(x_boundary), np.max(x_boundary), size=Nt)
-                        y_rand = np.random.uniform(np.min(y_boundary), np.max(y_boundary), size=Nt)
-                        random_points = np.column_stack((x_rand, y_rand))
-                        
-                        # Check which points are inside exterior boundary
-                        inside_exterior = exterior_triangulation.find_simplex(random_points) >= 0
-                        
-                        # Check which points are inside any interior boundary
-                        inside_interior = np.zeros_like(inside_exterior, dtype=bool)
-                        for interior_tri in interior_triangulations:
-                            inside_interior = inside_interior | (interior_tri.find_simplex(random_points) >= 0)
-                        
-                        # Keep points that are inside exterior but outside all interior boundaries
-                        valid_points = random_points[inside_exterior & ~inside_interior]
-                        samples.extend(valid_points)
-                    
-                    samples = np.array(samples)[:Nt]  # Keep exactly Nt points
-                    self._x, self._y = samples[:, 0].astype(np.float32), samples[:, 1].astype(np.float32)
-                    break
-                except Exception as e:
-                    attempt += 1
-                    if attempt == max_attempts:
-                        raise ValueError(f"Failed to sample points after {max_attempts} attempts: {str(e)}")
+            # Calculate total number of points
+            Nt = Nx * Ny * (Nz if not self.is2D and Nz is not None else 1)
+            
+            # Generate samples
+            samples = []
+            while len(samples) < Nt:
+                # Generate random points
+                x_rand = np.random.uniform(np.min(x_boundary), np.max(x_boundary), size=Nt)
+                y_rand = np.random.uniform(np.min(y_boundary), np.max(y_boundary), size=Nt)
+                
+                if not self.is2D and z_boundary is not None:
+                    z_rand = np.random.uniform(np.min(z_boundary), np.max(z_boundary), size=Nt)
+                    points = np.column_stack((x_rand, y_rand, z_rand))
+                else:
+                    points = np.column_stack((x_rand, y_rand))
+
+                # Check if points are inside the domain
+                valid_points = self._check_points_in_domain(points, x_boundary, y_boundary, z_boundary)
+                samples.extend(valid_points)
+
+            # Trim to exact number needed and reshape
+            samples = np.array(samples)[:Nt]
+            if not self.is2D:
+                self._x = samples[:, 0].reshape(Nx, Ny, Nz)
+                self._y = samples[:, 1].reshape(Nx, Ny, Nz)
+                self._z = samples[:, 2].reshape(Nx, Ny, Nz)
+            else:
+                self._x = samples[:, 0].reshape(Nx, Ny)
+                self._y = samples[:, 1].reshape(Nx, Ny)
+
         except Exception as e:
             print(f"Debug: Error during random sampling: {str(e)}")
+            raise
+
+    def _check_points_in_domain(self, points, x_boundary, y_boundary, z_boundary=None):
+        """Check if points are inside the domain using Delaunay triangulation."""
+        try:
+            if self.is2D or z_boundary is None:
+                # 2D case
+                boundary_points = np.column_stack((x_boundary, y_boundary))
+                triangulation = Delaunay(boundary_points)
+                inside = triangulation.find_simplex(points) >= 0
+            else:
+                # 3D case - use convex hull
+                from scipy.spatial import ConvexHull
+                boundary_points = np.column_stack((x_boundary, y_boundary, z_boundary))
+                hull = ConvexHull(boundary_points)
+                
+                # Use Delaunay for 3D point location
+                triangulation = Delaunay(boundary_points)
+                inside = triangulation.find_simplex(points) >= 0
+
+            # Check interior boundaries if they exist
+            if self._interiorBoundaries:
+                inside_interior = np.zeros_like(inside, dtype=bool)
+                for boundary_data in self._interiorBoundaries.values():
+                    x_interior = np.asarray(boundary_data['x'], dtype=np.float32).flatten()
+                    y_interior = np.asarray(boundary_data['y'], dtype=np.float32).flatten()
+                    
+                    if not self.is2D and 'z' in boundary_data:
+                        z_interior = np.asarray(boundary_data['z'], dtype=np.float32).flatten()
+                        interior_points = np.column_stack((x_interior, y_interior, z_interior))
+                    else:
+                        interior_points = np.column_stack((x_interior, y_interior))
+                        
+                    interior_tri = Delaunay(interior_points)
+                    inside_interior = inside_interior | (interior_tri.find_simplex(points) >= 0)
+                
+                # Keep points that are inside exterior but outside all interior boundaries
+                valid_mask = inside & ~inside_interior
+            else:
+                valid_mask = inside
+
+            return points[valid_mask]
+
+        except Exception as e:
+            print(f"Debug: Error checking points in domain: {str(e)}")
             raise
 
     def _sampleUniformlyWithinBoundary(self, x_boundary, y_boundary, z_boundary, Nx, Ny, Nz):
