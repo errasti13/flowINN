@@ -102,24 +102,31 @@ class Mesh:
             raise ValueError("No boundaries defined. Use setBoundary() to define boundaries before generating mesh")
 
         try:
-            if self.is2D:
-                self._generate2DMeshFromBoundary(sampling_method, Nx, Ny, None)
-            else:
-                self._generate3DMeshFromBoundary(sampling_method, Nx, Ny, Nz)
+            self._generateMeshFromBoundary(sampling_method, Nx, Ny, Nz)
         except Exception as e:
             raise ValueError(f"Mesh generation failed: {str(e)}")
         
-    def _generate2DMeshFromBoundary(self, sampling_method, Nx, Ny):
-        # Validate that all boundaries contain 'x' and 'y' coordinates
+    def _generateMeshFromBoundary(self, sampling_method, Nx, Ny, Nz):
+        # Validate boundaries
         for boundary_name, boundary_data in self.boundaries.items():
             if 'x' not in boundary_data or 'y' not in boundary_data:
                 raise ValueError(f"Boundary '{boundary_name}' must contain 'x' and 'y' coordinates.")
 
-        # Convert and combine boundary coordinates into numpy arrays
+        # Convert and combine boundary coordinates
         x_boundary = np.concatenate([np.asarray(boundary_data['x'], dtype=np.float32).flatten() 
                                    for boundary_data in self.boundaries.values()])
         y_boundary = np.concatenate([np.asarray(boundary_data['y'], dtype=np.float32).flatten() 
                                    for boundary_data in self.boundaries.values()])
+        
+        # Handle z coordinates for 3D case
+        if not self.is2D and Nz is not None:
+            z_boundaries = [boundary_data.get('z') for boundary_data in self.boundaries.values()]
+            if any(z is None for z in z_boundaries):
+                raise ValueError("3D mesh requires z coordinates for all boundaries")
+            z_boundary = np.concatenate([np.asarray(z, dtype=np.float32).flatten() 
+                                       for z in z_boundaries])
+        else:
+            z_boundary = None
 
         # Sampling logic
         if sampling_method == 'random':
