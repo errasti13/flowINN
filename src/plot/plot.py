@@ -77,64 +77,176 @@ class Plot:
         Visualize the solution field using scatter plot with boundaries.
         """
         x = self.mesh.x.flatten()
-        y = self.mesh.y.flatten()       
+        y = self.mesh.y.flatten()
+        
+        # Check if we're dealing with a 3D mesh
+        is3D = not self.mesh.is2D and self.mesh.z is not None
+        z = self.mesh.z.flatten() if is3D else None
 
         sol = self.mesh.solutions[solkey]
-        plt.figure(figsize=(10, 8))  # Larger figure size
-        plt.title(f'Solution Field: {solkey}', fontsize=12)
         
-        # Create custom colormap with better contrast
-        plt.set_cmap('viridis')
-        
-        # Plot mesh points with improved visibility
-        scatter = plt.scatter(x, y, 
-                            c=sol, 
-                            s=20,       # Larger points
-                            alpha=0.6,  # Semi-transparent
-                            cmap='jet',
-                            zorder=2)   # Draw above boundaries
-        
-        # Add colorbar with better formatting
-        cbar = plt.colorbar(scatter, label=solkey)
-        cbar.ax.tick_params(labelsize=10)
-        
-        # Plot exterior boundaries with better visibility
-        for boundary_data in self.mesh.boundaries.values():
-            x_boundary = boundary_data['x']
-            y_boundary = boundary_data['y']
-            plt.plot(x_boundary, y_boundary, 
-                    'k-',           # Black lines
-                    linewidth=1.5,  # Thicker lines
-                    zorder=3,       # Draw above scatter
-                    label='Exterior Boundary')
-        
-        # Plot interior boundaries if they exist
-        if self.mesh.interiorBoundaries:
-            for boundary_data in self.mesh.interiorBoundaries.values():
+        if is3D:
+            fig = plt.figure(figsize=(12, 8))
+            ax = fig.add_subplot(111, projection='3d')
+            
+            # Plot solution points only
+            scatter = ax.scatter(x, y, z,
+                               c=sol,
+                               s=20,
+                               alpha=0.6,
+                               cmap='jet')
+            
+            ax.set_xlabel('X')
+            ax.set_ylabel('Y')
+            ax.set_zlabel('Z')
+            
+            # Set aspect ratio to be equal
+            max_range = np.array([x.max()-x.min(), y.max()-y.min(), z.max()-z.min()]).max()
+            mid_x = (x.max()+x.min()) * 0.5
+            mid_y = (y.max()+y.min()) * 0.5
+            mid_z = (z.max()+z.min()) * 0.5
+            ax.set_xlim(mid_x - max_range*0.5, mid_x + max_range*0.5)
+            ax.set_ylim(mid_y - max_range*0.5, mid_y + max_range*0.5)
+            ax.set_zlim(mid_z - max_range*0.5, mid_z + max_range*0.5)
+            
+            plt.colorbar(scatter, label=solkey)
+            plt.title(f'Solution Field: {solkey}')
+            
+        else:
+            sol = self.mesh.solutions[solkey]
+            plt.figure(figsize=(10, 8))  # Larger figure size
+            plt.title(f'Solution Field: {solkey}', fontsize=12)
+            
+            # Create custom colormap with better contrast
+            plt.set_cmap('viridis')
+            
+            # Plot mesh points with improved visibility
+            scatter = plt.scatter(x, y, 
+                                c=sol, 
+                                s=20,       # Larger points
+                                alpha=0.6,  # Semi-transparent
+                                cmap='jet',
+                                zorder=2)   # Draw above boundaries
+            
+            # Add colorbar with better formatting
+            cbar = plt.colorbar(scatter, label=solkey)
+            cbar.ax.tick_params(labelsize=10)
+            
+            # Plot exterior boundaries with better visibility
+            for boundary_data in self.mesh.boundaries.values():
                 x_boundary = boundary_data['x']
                 y_boundary = boundary_data['y']
                 plt.plot(x_boundary, y_boundary, 
-                        'r-',           # Red lines
-                        linewidth=2,    # Thicker lines
+                        'k-',           # Black lines
+                        linewidth=1.5,  # Thicker lines
                         zorder=3,       # Draw above scatter
-                        label='Interior Boundary')
+                        label='Exterior Boundary')
+            
+            # Plot interior boundaries if they exist
+            if self.mesh.interiorBoundaries:
+                for boundary_data in self.mesh.interiorBoundaries.values():
+                    x_boundary = boundary_data['x']
+                    y_boundary = boundary_data['y']
+                    plt.plot(x_boundary, y_boundary, 
+                            'r-',           # Red lines
+                            linewidth=2,    # Thicker lines
+                            zorder=3,       # Draw above scatter
+                            label='Interior Boundary')
+            
+            plt.xlabel('X', fontsize=11)
+            plt.ylabel('Y', fontsize=11)
+            plt.axis('equal')
+            
+            # Remove duplicate labels and position legend
+            handles, labels = plt.gca().get_legend_handles_labels()
+            by_label = dict(zip(labels, handles))
+            plt.legend(by_label.values(), by_label.keys(), 
+                    loc='upper right', 
+                    framealpha=0.9,
+                    fontsize=10)
+            
+            # Add grid for better readability
+            plt.grid(True, linestyle='--', alpha=0.3, zorder=1)
+            
+            # Adjust layout and display
+            plt.tight_layout()
+            plt.show()
+
+        plt.tight_layout()
+        plt.show()
+
+    def plotSlices(self, solkey, num_points=50):
+        """
+        Create slice plots for 3D solution fields using interpolation onto regular grids.
+        """
+        if self.mesh.is2D:
+            raise ValueError("Slice plotting is only available for 3D meshes")
+
+        from scipy.interpolate import griddata
+
+        # Get flattened coordinates and solution
+        x = self.mesh.x.flatten()
+        y = self.mesh.y.flatten()
+        z = self.mesh.z.flatten()
+        sol = self.mesh.solutions[solkey]
+
+        # Create regular grids for each slice plane
+        x_unique = np.linspace(x.min(), x.max(), num_points)
+        y_unique = np.linspace(y.min(), y.max(), num_points)
+        z_unique = np.linspace(z.min(), z.max(), num_points)
+
+        # Create slice positions
+        x_mid = x_unique[num_points//2]
+        y_mid = y_unique[num_points//2]
+        z_mid = z_unique[num_points//2]
+
+        fig = plt.figure(figsize=(15, 5))
         
-        plt.xlabel('X', fontsize=11)
-        plt.ylabel('Y', fontsize=11)
-        plt.axis('equal')
+        # YZ plane (x = constant)
+        ax1 = fig.add_subplot(131)
+        yy_yz, zz_yz = np.meshgrid(y_unique, z_unique)
+        xx_yz = np.full_like(yy_yz, x_mid)
+        points_yz = np.column_stack((xx_yz.flatten(), yy_yz.flatten(), zz_yz.flatten()))
+        sol_yz = griddata((x, y, z), sol, points_yz, method='linear')
+        sol_yz = sol_yz.reshape(xx_yz.shape)
         
-        # Remove duplicate labels and position legend
-        handles, labels = plt.gca().get_legend_handles_labels()
-        by_label = dict(zip(labels, handles))
-        plt.legend(by_label.values(), by_label.keys(), 
-                  loc='upper right', 
-                  framealpha=0.9,
-                  fontsize=10)
+        im1 = ax1.contourf(yy_yz, zz_yz, sol_yz, levels=50, cmap='jet')
+        plt.colorbar(im1, ax=ax1)
+        ax1.set_title(f'{solkey} at x={x_mid:.2f}')
+        ax1.set_xlabel('Y')
+        ax1.set_ylabel('Z')
+        ax1.set_aspect('equal')
         
-        # Add grid for better readability
-        plt.grid(True, linestyle='--', alpha=0.3, zorder=1)
+        # XZ plane (y = constant)
+        ax2 = fig.add_subplot(132)
+        xx_xz, zz_xz = np.meshgrid(x_unique, z_unique)
+        yy_xz = np.full_like(xx_xz, y_mid)
+        points_xz = np.column_stack((xx_xz.flatten(), yy_xz.flatten(), zz_xz.flatten()))
+        sol_xz = griddata((x, y, z), sol, points_xz, method='linear')
+        sol_xz = sol_xz.reshape(xx_xz.shape)
         
-        # Adjust layout and display
+        im2 = ax2.contourf(xx_xz, zz_xz, sol_xz, levels=50, cmap='jet')
+        plt.colorbar(im2, ax=ax2)
+        ax2.set_title(f'{solkey} at y={y_mid:.2f}')
+        ax2.set_xlabel('X')
+        ax2.set_ylabel('Z')
+        ax2.set_aspect('equal')
+        
+        # XY plane (z = constant)
+        ax3 = fig.add_subplot(133)
+        xx_xy, yy_xy = np.meshgrid(x_unique, y_unique)
+        zz_xy = np.full_like(xx_xy, z_mid)
+        points_xy = np.column_stack((xx_xy.flatten(), yy_xy.flatten(), zz_xy.flatten()))
+        sol_xy = griddata((x, y, z), sol, points_xy, method='linear')
+        sol_xy = sol_xy.reshape(xx_xy.shape)
+        
+        im3 = ax3.contourf(xx_xy, yy_xy, sol_xy, levels=50, cmap='jet')
+        plt.colorbar(im3, ax=ax3)
+        ax3.set_title(f'{solkey} at z={z_mid:.2f}')
+        ax3.set_xlabel('X')
+        ax3.set_ylabel('Y')
+        ax3.set_aspect('equal')
+        
         plt.tight_layout()
         plt.show()
 
