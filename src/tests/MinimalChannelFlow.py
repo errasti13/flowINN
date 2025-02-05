@@ -117,26 +117,6 @@ class MinimalChannelFlow:
             },
             'Bottom': {
                 'x': x_grid_xy.flatten(),
-                'y': np.full(n_face, self.yRange[0], dtype=np.float32),
-                'z': z_grid_xz.flatten(),
-                'conditions': {
-                    'u': np.zeros(n_face),
-                    'v': np.zeros(n_face),
-                    'w': np.zeros(n_face)
-                }
-            },
-            'Top': {
-                'x': x_grid_xy.flatten(),
-                'y': np.full(n_face, self.yRange[1], dtype=np.float32),
-                'z': z_grid_xz.flatten(),
-                'conditions': {
-                    'u': np.zeros(n_face),
-                    'v': np.zeros(n_face),
-                    'w': np.zeros(n_face)
-                }
-            },
-            'Front': {
-                'x': x_grid_xy.flatten(),
                 'y': y_grid_xy.flatten(),
                 'z': np.full(n_face, self.zRange[0], dtype=np.float32),
                 'conditions': {
@@ -145,15 +125,27 @@ class MinimalChannelFlow:
                     'w': np.zeros(n_face)
                 }
             },
-            'Back': {
+            'Top': {
                 'x': x_grid_xy.flatten(),
                 'y': y_grid_xy.flatten(),
                 'z': np.full(n_face, self.zRange[1], dtype=np.float32),
                 'conditions': {
-                    'u': np.zeros(n_face),
-                    'v': np.zeros(n_face),
-                    'w': np.zeros(n_face)
+                    'u': np.ones(n_face),
+                    'v': None,
+                    'w': None
                 }
+            },
+            'Front': {
+                'x': x_grid_xz.flatten(),
+                'y': np.full(n_face, self.yRange[0], dtype=np.float32),
+                'z': z_grid_xz.flatten(),
+                'conditions': {}
+            },
+            'Back': {
+                'x': x_grid_xz.flatten(),
+                'y': np.full(n_face, self.yRange[1], dtype=np.float32),
+                'z': z_grid_xz.flatten(),
+                'conditions': {}
             }
         }
         
@@ -229,6 +221,8 @@ class MinimalChannelFlow:
 
     def plot(self, solkey='u'):
         self.Plot.scatterPlot(solkey)
+        if not self.is2D:
+            self.Plot.plotSlices(solkey)
 
     def load_model(self):
         self.model.load(self.problemTag)
