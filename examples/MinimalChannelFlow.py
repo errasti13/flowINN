@@ -18,15 +18,17 @@ def main():
     z_range = (0.0, 1.0)   # Channel width
     
     # Training parameters
-    epochs = 20000
+    epochs = 100000
     print_interval = 100
-    autosave_interval = 5000
+    autosave_interval = 1000
 
     # Mesh parameters
-    nx = 40
-    ny = 30
-    nz = 30
+    nx = 20
+    ny = 10
+    nz = 10
     n_boundary = 100
+
+    trainedModel = False
     
     try:
         # Initialize channel flow
@@ -38,13 +40,15 @@ def main():
                            NBoundary=n_boundary, 
                            sampling_method='uniform')
         
-        channel.mesh.showMesh()
-        
         # Train the model
-        print("Starting training...")
-        channel.train(epochs=epochs, 
-                     print_interval=print_interval,
-                     autosaveInterval=autosave_interval)
+        if trainedModel:
+            print("Loading pre-trained model...")
+            channel.load_model()
+        else:
+            print("Starting training...")
+            channel.train(epochs=epochs, 
+                        print_interval=print_interval,
+                        autosaveInterval=autosave_interval)
         
         # Predict and visualize
         print("Predicting flow field...")
