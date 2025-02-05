@@ -66,7 +66,7 @@ class NavierStokesLoss:
         if self.mesh.is2D:
             return self.loss_function2D()
         else:
-            raise NotImplementedError("Only 2D loss functions are implemented for now.")
+            return self.loss_function3D()
 
     def loss_function2D(self):
         X = tf.reshape(tf.convert_to_tensor(self.mesh.x, dtype=tf.float32), [-1, 1])
@@ -134,6 +134,48 @@ class NavierStokesLoss:
 
         return total_loss
 
+    def loss_function3D(self):
+        """3D version of the loss function."""
+        X = tf.reshape(tf.convert_to_tensor(self.mesh.x, dtype=tf.float32), [-1, 1])
+        Y = tf.reshape(tf.convert_to_tensor(self.mesh.y, dtype=tf.float32), [-1, 1])
+        Z = tf.reshape(tf.convert_to_tensor(self.mesh.z, dtype=tf.float32), [-1, 1])
+
+        total_loss = 0.0
+
+        # Compute physics loss
+        with tf.GradientTape(persistent=True) as tape:
+            tape.watch([X, Y, Z])
+            uvwp_pred = self.model.model(tf.concat([X, Y, Z], axis=1))
+            u_pred = uvwp_pred[:, 0]
+            v_pred = uvwp_pred[:, 1]
+            w_pred = uvwp_pred[:, 2]
+            p_pred = uvwp_pred[:, 3]
+
+            physics_loss = self.compute_physics_loss_3d(u_pred, v_pred, w_pred, p_pred, X, Y, Z, tape)
+            total_loss += self.physicsWeight * physics_loss
+
+        # Compute exterior boundary losses
+        boundary_loss = 0.0
+        for boundary_name, boundary_data in self.mesh.boundaries.items():
+            try:
+                xBc = self.convert_and_reshape(boundary_data['x'])
+                yBc = self.convert_and_reshape(boundary_data['y'])
+                zBc = self.convert_and_reshape(boundary_data['z'])
+                uBc = boundary_data.get('u')
+                vBc = boundary_data.get('v')
+                wBc = boundary_data.get('w')
+                pBc = boundary_data.get('p')
+
+                boundary_loss += self.computeBoundaryLoss3D(
+                    self.model.model, xBc, yBc, zBc, uBc, vBc, wBc, pBc
+                )
+            except Exception as e:
+                print(f"Warning: Error processing boundary {boundary_name}: {str(e)}")
+                continue
+
+        total_loss += self.boundaryWeight * boundary_loss
+        return total_loss
+
     def compute_physics_loss(self, u_pred, v_pred, p_pred, X, Y, tape):
         """Compute physics-based loss terms for Navier-Stokes equations.
     
@@ -141,8 +183,7 @@ class NavierStokesLoss:
             u_pred: Predicted x-velocity component
             v_pred: Predicted y-velocity component
             p_pred: Predicted pressure
-            X: X coordinates tensor
-            Y: Y coordinates tensor
+            X: X coordinates tensor            Y: Y coordinates tensor
             tape: GradientTape instance for automatic differentiation
             
         Returns:
@@ -156,6 +197,19 @@ class NavierStokesLoss:
         continuity_loss = tf.reduce_mean(tf.square(continuity))
 
         return f_loss_u + f_loss_v + continuity_loss
+
+    def compute_physics_loss_3d(self, u_pred, v_pred, w_pred, p_pred, X, Y, Z, tape):
+        """Compute physics-based loss terms for 3D Navier-Stokes equations."""
+        continuity, momentum_u, momentum_v, momentum_w = self._physics_loss.get_residuals(
+            u_pred, v_pred, w_pred, p_pred, X, Y, Z, tape
+        )
+
+        f_loss_u = tf.reduce_mean(tf.square(momentum_u))
+        f_loss_v = tf.reduce_mean(tf.square(momentum_v))
+        f_loss_w = tf.reduce_mean(tf.square(momentum_w))
+        continuity_loss = tf.reduce_mean(tf.square(continuity))
+
+        return f_loss_u + f_loss_v + f_loss_w + continuity_loss
          
     def convert_and_reshape(self, tensor, dtype=tf.float32, shape=(-1, 1)):
                         if tensor is not None:
@@ -185,3 +239,22 @@ class NavierStokesLoss:
         pBc_loss = compute_loss(pBc, 2)
 
         return uBc_loss, vBc_loss, pBc_loss
+
+    def computeBoundaryLoss3D(self, model, xBc, yBc, zBc, uBc, vBc, wBc, pBc):
+        """Compute boundary loss for 3D case."""
+        def compute_component_loss(bc, idx):
+            if bc is not None:
+                pred = model(tf.concat([
+                    tf.cast(xBc, dtype=tf.float32),
+                    tf.cast(yBc, dtype=tf.float32),
+                    tf.cast(zBc, dtype=tf.float32)
+                ], axis=1))[:, idx]
+                return tf.reduce_mean(tf.square(pred - tf.cast(bc, dtype=tf.float32)))
+            return tf.constant(0.0)
+
+        u_loss = compute_component_loss(uBc, 0)
+        v_loss = compute_component_loss(vBc, 1)
+        w_loss = compute_component_loss(wBc, 2)
+        p_loss = compute_component_loss(pBc, 3)
+
+        return u_loss + v_loss + w_loss + p_loss
