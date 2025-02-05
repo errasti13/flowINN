@@ -175,9 +175,14 @@ class Plot:
         plt.tight_layout()
         plt.show()
 
-    def plotSlices(self, solkey, num_points=50):
+    def plotSlices(self, solkey, num_points=50, z_cuts=None):
         """
         Create slice plots for 3D solution fields using interpolation onto regular grids.
+        
+        Args:
+            solkey: Solution field to plot
+            num_points: Number of points for interpolation grid
+            z_cuts: List of z-positions for slices (between 0 and 1), default is [0.25, 0.5, 0.75]
         """
         if self.mesh.is2D:
             raise ValueError("Slice plotting is only available for 3D meshes")
@@ -190,35 +195,65 @@ class Plot:
         z = self.mesh.z.flatten()
         sol = self.mesh.solutions[solkey]
 
-        # Create regular grids for each slice plane
+        # Create regular grids
         x_unique = np.linspace(x.min(), x.max(), num_points)
         y_unique = np.linspace(y.min(), y.max(), num_points)
         z_unique = np.linspace(z.min(), z.max(), num_points)
 
-        # Create slice positions
-        x_mid = x_unique[num_points//2]
-        y_mid = y_unique[num_points//2]
-        z_mid = z_unique[num_points//2]
+        # Default z-cuts if none provided
+        if z_cuts is None:
+            z_cuts = [0.25, 0.5, 0.75]
 
-        fig = plt.figure(figsize=(15, 5))
+        # Calculate actual z positions
+        z_positions = [z.min() + cut * (z.max() - z.min()) for cut in z_cuts]
+        n_cuts = len(z_positions)
+
+        # Create figure with subplots for each z-cut
+        fig = plt.figure(figsize=(5*n_cuts, 4))
         
-        # YZ plane (x = constant)
-        ax1 = fig.add_subplot(131)
+        for idx, z_pos in enumerate(z_positions):
+            ax = fig.add_subplot(1, n_cuts, idx+1)
+            
+            # Create XY plane at specific z
+            xx_xy, yy_xy = np.meshgrid(x_unique, y_unique)
+            zz_xy = np.full_like(xx_xy, z_pos)
+            points_xy = np.column_stack((xx_xy.flatten(), yy_xy.flatten(), zz_xy.flatten()))
+            
+            # Interpolate solution
+            sol_xy = griddata((x, y, z), sol, points_xy, method='linear')
+            sol_xy = sol_xy.reshape(xx_xy.shape)
+            
+            # Plot contour
+            im = ax.contourf(xx_xy, yy_xy, sol_xy, levels=50, cmap='jet')
+            plt.colorbar(im, ax=ax)
+            ax.set_title(f'{solkey} at z/H={z_cuts[idx]:.2f}')
+            ax.set_xlabel('X')
+            ax.set_ylabel('Y')
+            ax.set_aspect('equal')
+
+        plt.tight_layout()
+        plt.show()
+
+        # Now show YZ and XZ middle planes
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
+        
+        # YZ plane (x = middle)
+        x_mid = x_unique[num_points//2]
         yy_yz, zz_yz = np.meshgrid(y_unique, z_unique)
         xx_yz = np.full_like(yy_yz, x_mid)
         points_yz = np.column_stack((xx_yz.flatten(), yy_yz.flatten(), zz_yz.flatten()))
         sol_yz = griddata((x, y, z), sol, points_yz, method='linear')
-        sol_yz = sol_yz.reshape(xx_yz.shape)
+        sol_yz = sol_yz.reshape(yy_yz.shape)
         
         im1 = ax1.contourf(yy_yz, zz_yz, sol_yz, levels=50, cmap='jet')
         plt.colorbar(im1, ax=ax1)
-        ax1.set_title(f'{solkey} at x={x_mid:.2f}')
+        ax1.set_title(f'{solkey} at x/L=0.5')
         ax1.set_xlabel('Y')
         ax1.set_ylabel('Z')
         ax1.set_aspect('equal')
         
-        # XZ plane (y = constant)
-        ax2 = fig.add_subplot(132)
+        # XZ plane (y = middle)
+        y_mid = y_unique[num_points//2]
         xx_xz, zz_xz = np.meshgrid(x_unique, z_unique)
         yy_xz = np.full_like(xx_xz, y_mid)
         points_xz = np.column_stack((xx_xz.flatten(), yy_xz.flatten(), zz_xz.flatten()))
@@ -227,25 +262,10 @@ class Plot:
         
         im2 = ax2.contourf(xx_xz, zz_xz, sol_xz, levels=50, cmap='jet')
         plt.colorbar(im2, ax=ax2)
-        ax2.set_title(f'{solkey} at y={y_mid:.2f}')
+        ax2.set_title(f'{solkey} at y/H=0.5')
         ax2.set_xlabel('X')
         ax2.set_ylabel('Z')
         ax2.set_aspect('equal')
-        
-        # XY plane (z = constant)
-        ax3 = fig.add_subplot(133)
-        xx_xy, yy_xy = np.meshgrid(x_unique, y_unique)
-        zz_xy = np.full_like(xx_xy, z_mid)
-        points_xy = np.column_stack((xx_xy.flatten(), yy_xy.flatten(), zz_xy.flatten()))
-        sol_xy = griddata((x, y, z), sol, points_xy, method='linear')
-        sol_xy = sol_xy.reshape(xx_xy.shape)
-        
-        im3 = ax3.contourf(xx_xy, yy_xy, sol_xy, levels=50, cmap='jet')
-        plt.colorbar(im3, ax=ax3)
-        ax3.set_title(f'{solkey} at z={z_mid:.2f}')
-        ax3.set_xlabel('X')
-        ax3.set_ylabel('Y')
-        ax3.set_aspect('equal')
         
         plt.tight_layout()
         plt.show()
