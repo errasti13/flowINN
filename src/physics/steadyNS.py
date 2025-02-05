@@ -37,10 +37,11 @@ class NavierStokes3D:
         continuity = u_x + v_y + w_z
 
         # Momentum equations
-        momentum_u = u * u_x + v * u_y + p_x - self.nu * (u_xx + u_yy)
-        momentum_v = u * v_x + v * v_y + p_y - self.nu * (v_xx + v_yy)
+        momentum_u = u * u_x + v * u_y + p_x - self.nu * (u_xx + u_yy + u_zz)
+        momentum_v = u * v_x + v * v_y + p_y - self.nu * (v_xx + v_yy + v_zz)
+        momentum_w = u * w_x + v * w_y + p_z - self.nu * (w_xx + w_yy + w_zz)
 
-        return continuity, momentum_u, momentum_v
+        return continuity, momentum_u, momentum_v, momentum_w
     
 
 class NavierStokes2D:
