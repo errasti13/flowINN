@@ -25,7 +25,7 @@ class PINN:
             decay_rate=0.9
         )
 
-    @tf.function
+    @tf.function(jit_compile=True)  # This enables XLA compilation
     def train_step(self, loss_function):
         with tf.GradientTape() as tape:
             loss = loss_function()  # Call the loss function here to compute the loss
