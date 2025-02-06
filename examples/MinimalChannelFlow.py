@@ -14,12 +14,12 @@ def main():
     autosave_interval = 10000
 
     # Mesh parameters
-    nx = 20
-    ny = 10
-    nz = 10
+    nx = 30
+    ny = 15
+    nz = 20
     n_boundary = 100
 
-    trainedModel = True
+    trainedModel = False
     
     try:
         # Initialize channel flow
