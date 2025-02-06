@@ -1,6 +1,5 @@
 import tensorflow as tf
 import matplotlib.pyplot as plt
-from matplotlib.ticker import ScalarFormatter
 
 class PINN:
     def __init__(self, input_shape=2, output_shape=1, layers=[20, 20, 20], activation='tanh', learning_rate=0.01, eq = 'LidDrivenCavity'):

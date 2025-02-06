@@ -1,13 +1,4 @@
-import os
-import sys
 import numpy as np
-from pathlib import Path
-
-# Add src to path
-src_path = str(Path(__file__).parent.parent)
-if src_path not in sys.path:
-    sys.path.append(src_path)
-
 from src.tests.MinimalChannelFlow import MinimalChannelFlow
 
 def main():
@@ -20,7 +11,7 @@ def main():
     # Training parameters
     epochs = 100000
     print_interval = 100
-    autosave_interval = 1000
+    autosave_interval = 10000
 
     # Mesh parameters
     nx = 20
@@ -28,7 +19,7 @@ def main():
     nz = 10
     n_boundary = 100
 
-    trainedModel = False
+    trainedModel = True
     
     try:
         # Initialize channel flow
