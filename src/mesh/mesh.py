@@ -254,7 +254,10 @@ class Mesh:
         inside = triangulation.find_simplex(grid_points) >= 0
         inside_points = grid_points[inside]
         
-        self._x, self._y, self._z = inside_points[:, 0].astype(np.float32), inside_points[:, 1].astype(np.float32), inside_points[:, 2].astype(np.float32)
+        if self.is2D:
+            self._x, self._y = inside_points[:, 0].astype(np.float32), inside_points[:, 1].astype(np.float32)
+        else:
+            self._x, self._y, self._z = inside_points[:, 0].astype(np.float32), inside_points[:, 1].astype(np.float32), inside_points[:, 2].astype(np.float32)
 
 
     def setBoundary(self, boundary_name, xBc, yBc, interior=False, **boundary_conditions):
