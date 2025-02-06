@@ -1,9 +1,9 @@
 import numpy as np
-
 from src.mesh.mesh import Mesh
 from src.models.model import PINN
 from src.training.loss import NavierStokesLoss
 from src.plot.plot import Plot
+from src.physics.boundary_conditions import MovingWallBC, WallBC
 
 class LidDrivenCavity():
     
@@ -20,36 +20,73 @@ class LidDrivenCavity():
         self.xRange = xRange
         self.yRange = yRange
 
+        # Initialize boundary conditions
+        self.moving_wall_bc = MovingWallBC("top_wall")
+        self.wall_bc = WallBC("wall")
+
         return
     
     def generateMesh(self, Nx=100, Ny=100, NBoundary=100, sampling_method='random'):
-        # Initialize boundaries
+        # Initialize boundaries with new BC system
         self.mesh.boundaries = {
-            'left': {'x': None, 'y': None, 'u': None, 'v': None, 'p': None},
-            'right': {'x': None, 'y': None, 'u': None, 'v': None, 'p': None},
-            'bottom': {'x': None, 'y': None, 'u': None, 'v': None, 'p': None},
-            'top': {'x': None, 'y': None, 'u': None, 'v': None, 'p': None}
+            'left': {
+                'x': np.full((NBoundary, 1), self.xRange[0], dtype=np.float32),
+                'y': np.linspace(self.yRange[0], self.yRange[1], NBoundary),
+                'conditions': {
+                    'u': {'value': 0.0},
+                    'v': {'value': 0.0},
+                    'p': {'gradient': 0.0, 'direction': 'x'}
+                },
+                'bc_type': self.wall_bc
+            },
+            'right': {
+                'x': np.full((NBoundary, 1), self.xRange[1], dtype=np.float32),
+                'y': np.linspace(self.yRange[0], self.yRange[1], NBoundary),
+                'conditions': {
+                    'u': {'value': 0.0},
+                    'v': {'value': 0.0},
+                    'p': {'gradient': 0.0, 'direction': 'x'}
+                },
+                'bc_type': self.wall_bc
+            },
+            'bottom': {
+                'x': np.linspace(self.xRange[0], self.xRange[1], NBoundary),
+                'y': np.full((NBoundary, 1), self.yRange[0], dtype=np.float32),
+                'conditions': {
+                    'u': {'value': 0.0},
+                    'v': {'value': 0.0},
+                    'p': {'gradient': 0.0, 'direction': 'y'}
+                },
+                'bc_type': self.wall_bc
+            },
+            'top': {
+                'x': np.linspace(self.xRange[0], self.xRange[1], NBoundary),
+                'y': np.full((NBoundary, 1), self.yRange[1], dtype=np.float32),
+                'conditions': {
+                    'u': {'value': 1.0},  # Moving wall
+                    'v': {'value': 0.0},
+                    'p': {'gradient': 0.0, 'direction': 'y'}
+                },
+                'bc_type': self.moving_wall_bc
+            }
         }
         
+        # Set boundary coordinates
         self.mesh.setBoundary('top',
                     np.linspace(self.xRange[0], self.xRange[1], NBoundary),
-                    np.full((NBoundary, 1), self.yRange[1], dtype=np.float32),
-                    u = np.ones(NBoundary), v = np.zeros(NBoundary))
+                    np.full((NBoundary, 1), self.yRange[1], dtype=np.float32))
 
         self.mesh.setBoundary('bottom',
                     np.linspace(self.xRange[0], self.xRange[1], NBoundary),
-                    np.full((NBoundary, 1), self.yRange[0], dtype=np.float32),
-                    u = np.zeros(NBoundary), v = np.zeros(NBoundary))
+                    np.full((NBoundary, 1), self.yRange[0], dtype=np.float32))
 
         self.mesh.setBoundary('left',
                     np.full((NBoundary, 1), self.xRange[0], dtype=np.float32),
-                    np.linspace(self.yRange[0], self.yRange[1], NBoundary),
-                    u = np.zeros(NBoundary), v = np.zeros(NBoundary))
+                    np.linspace(self.yRange[0], self.yRange[1], NBoundary))
 
         self.mesh.setBoundary('right',
                     np.full((NBoundary, 1), self.xRange[1], dtype=np.float32),
-                    np.linspace(self.yRange[0], self.yRange[1], NBoundary),
-                    u = np.zeros(NBoundary), v = np.zeros(NBoundary))
+                    np.linspace(self.yRange[0], self.yRange[1], NBoundary))
         
         # Generate the mesh
         self.mesh.generateMesh(
@@ -83,3 +120,6 @@ class LidDrivenCavity():
 
     def plot(self, solkey = 'u', streamlines = False):
         self.Plot.plot(solkey, streamlines)
+
+    def load_model(self):
+        self.model.load(self.problemTag)
