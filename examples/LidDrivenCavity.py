@@ -1,24 +1,56 @@
 from src.tests.LidDrivenCavity import LidDrivenCavity
 
-
 def main():
+    # Domain setup
     x_range = (-1, 1)
     y_range = (-1, 1)
-
-    equation = LidDrivenCavity('LidDrivenCavity', x_range, y_range)
     
-    equation.generateMesh(Nx = 60, Ny = 100)
+    # Simulation parameters
+    case_name = "LidDrivenCavity"
+    epochs = 1000
+    print_interval = 100
+    autosave_interval = 1000
+    
+    # Mesh parameters
+    nx = 60
+    ny = 100
+    n_boundary = 100
 
-    #equation.train(epochs=1000)
-
-    equation.model.load("trainedModels/" + equation.problemTag + ".tf")
-
-    equation.predict()
-    equation.plot('u')
-    equation.plot('v')
-    equation.plot('p')
-
-    return
+    trainedModel = False
+    
+    try:
+        # Initialize simulation
+        cavity = LidDrivenCavity(case_name, x_range, y_range)
+        
+        # Generate mesh
+        print("Generating mesh...")
+        cavity.generateMesh(Nx=nx, Ny=ny, NBoundary=n_boundary, sampling_method='uniform')
+        
+        # Train or load model
+        if trainedModel:
+            print("Loading pre-trained model...")
+            cavity.load_model()
+        else:
+            print("Starting training...")
+            cavity.train(epochs=epochs, 
+                        print_interval=print_interval,
+                        autosaveInterval=autosave_interval)
+        
+        # Predict and visualize
+        print("Predicting flow field...")
+        cavity.predict()
+        
+        # Plot results
+        print("Generating plots...")
+        cavity.plot(solkey='u')
+        cavity.plot(solkey='v')
+        cavity.plot(solkey='p')
+        
+        print("Simulation completed successfully!")
+        
+    except Exception as e:
+        print(f"Error during simulation: {str(e)}")
+        raise
 
 if __name__ == "__main__":
     main()
