@@ -3,7 +3,7 @@ import tensorflow as tf
 from typing import Union, Optional
 
 class NavierStokesLoss:
-    def __init__(self, mesh, model, weights = [0.5, 0.5]) -> None:  # Updated weights
+    def __init__(self, mesh, model, weights = [0.7, 0.3]) -> None:  # Adjusted weights for physics vs boundary
         self._mesh = mesh
         self._model = model
         self._physics_loss = NavierStokes2D() if mesh.is2D else NavierStokes3D()
@@ -63,6 +63,7 @@ class NavierStokesLoss:
         self._nu = float(value)
 
     def loss_function(self):
+        """Compute combined physics and boundary condition losses"""
         if self.mesh.is2D:
             return self.loss_function2D()
         else:
@@ -85,23 +86,68 @@ class NavierStokesLoss:
             physics_loss = self.compute_physics_loss(u_pred, v_pred, p_pred, X, Y, tape)
             total_loss += self.physicsWeight * physics_loss
 
-        # Compute exterior boundary losses
+        # Compute boundary losses
         boundary_loss = 0.0
         for boundary_name, boundary_data in self.mesh.boundaries.items():
             try:
-                xBc = self.convert_and_reshape(boundary_data['x'])
-                yBc = self.convert_and_reshape(boundary_data['y'])
-                uBc, vBc, pBc = self.imposeBoundaryCondition(
-                    boundary_data.get('u'), 
-                    boundary_data.get('v'), 
-                    boundary_data.get('p')
-                )
+                # Get boundary coordinates
+                x_bc = tf.reshape(tf.convert_to_tensor(boundary_data['x'], dtype=tf.float32), [-1, 1])
+                y_bc = tf.reshape(tf.convert_to_tensor(boundary_data['y'], dtype=tf.float32), [-1, 1])
+                
+                # Get boundary conditions object and values
+                bc_type = boundary_data['bc_type']
+                conditions = boundary_data['conditions']
 
-                u_loss, v_loss, p_loss = self.computeBoundaryLoss(
-                    self.model.model, xBc, yBc, uBc, vBc, pBc
-                )
-                boundary_loss += (u_loss + v_loss + p_loss)
-            
+                # Apply boundary conditions using the BC object
+                with tf.GradientTape(persistent=True) as bc_tape:
+                    bc_tape.watch([x_bc, y_bc])
+                    uvp_bc = self.model.model(tf.concat([x_bc, y_bc], axis=1))
+                    
+                    # Get predicted values at boundary
+                    u_bc = uvp_bc[:, 0]
+                    v_bc = uvp_bc[:, 1]
+                    p_bc = uvp_bc[:, 2]
+
+                    # Apply boundary conditions and get constraints
+                    bc_results = bc_type.apply(x_bc, y_bc, conditions, bc_tape)
+
+                    # Compute losses for each variable
+                    for var_name, bc_info in bc_results.items():
+                        if bc_info is None:
+                            continue
+                            
+                        if 'value' in bc_info:
+                            # Handle Dirichlet condition
+                            target_value = tf.cast(bc_info['value'], tf.float32)
+                            if var_name == 'u':
+                                boundary_loss += tf.reduce_mean(tf.square(u_bc - target_value))
+                            elif var_name == 'v':
+                                boundary_loss += tf.reduce_mean(tf.square(v_bc - target_value))
+                            elif var_name == 'p':
+                                boundary_loss += tf.reduce_mean(tf.square(p_bc - target_value))
+                                
+                        if 'gradient' in bc_info:
+                            # Handle gradient condition
+                            target_gradient = tf.cast(bc_info['gradient'], tf.float32)
+                            direction = bc_info['direction']
+                            
+                            if direction == 'x':
+                                grad = bc_tape.gradient(uvp_bc, x_bc)
+                            elif direction == 'y':
+                                grad = bc_tape.gradient(uvp_bc, y_bc)
+                            elif isinstance(direction, tuple):
+                                nx, ny = direction
+                                grad_x = bc_tape.gradient(uvp_bc, x_bc)
+                                grad_y = bc_tape.gradient(uvp_bc, y_bc)
+                                grad = nx * grad_x + ny * grad_y
+                                
+                            if var_name == 'u':
+                                boundary_loss += tf.reduce_mean(tf.square(grad[:, 0] - target_gradient))
+                            elif var_name == 'v':
+                                boundary_loss += tf.reduce_mean(tf.square(grad[:, 1] - target_gradient))
+                            elif var_name == 'p':
+                                boundary_loss += tf.reduce_mean(tf.square(grad[:, 2] - target_gradient))
+
             except Exception as e:
                 print(f"Warning: Error processing boundary {boundary_name}: {str(e)}")
                 continue
