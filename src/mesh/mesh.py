@@ -271,7 +271,7 @@ class Mesh:
         for var_name, values in boundary_conditions.items():
             self.setBoundaryCondition(xBc, yBc, values, var_name, boundary_name, interior=interior)
 
-    def setBoundaryCondition(self, xCoord, yCoord, value, varName, boundaryName, zCoord=None, interior=False):
+    def setBoundaryCondition(self, xCoord, yCoord, value, varName, boundaryName, zCoord=None, interior=False, bc_type=None):
         """Set boundary conditions for either exterior or interior boundaries."""
         # Select appropriate boundary dictionary
         boundary_dict = self._interiorBoundaries if interior else self._boundaries
@@ -289,9 +289,10 @@ class Mesh:
                 raise ValueError(f"z coordinate required for 3D mesh in boundary {boundaryName}")
             boundary_dict[boundaryName]['z'] = np.asarray(zCoord, dtype=np.float32)
         
-        # Set boundary condition value if provided
+        # Set boundary condition value and type
         if value is not None:
             boundary_dict[boundaryName][varName] = np.asarray(value, dtype=np.float32)
+            boundary_dict[boundaryName][f'{varName}_type'] = bc_type
         
         # Set type flag
         boundary_dict[boundaryName]['isInterior'] = interior
