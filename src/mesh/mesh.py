@@ -244,12 +244,31 @@ class Mesh:
         # Check which grid points are inside the triangulation
         inside = triangulation.find_simplex(grid_points) >= 0
         inside_points = grid_points[inside]
+
+        # Remove points inside interior boundaries
+        if self._interiorBoundaries:
+            for boundary_data in self._interiorBoundaries.values():
+                x_int = boundary_data['x'].flatten()
+                y_int = boundary_data['y'].flatten()
+                if not self.is2D:
+                    z_int = boundary_data['z'].flatten()
+                    interior_points = np.column_stack((x_int, y_int, z_int))
+                else:
+                    interior_points = np.column_stack((x_int, y_int))
+                
+                # Create Delaunay triangulation for interior boundary
+                interior_tri = Delaunay(interior_points)
+                
+                # Find points inside the interior boundary
+                inside_interior = interior_tri.find_simplex(inside_points) >= 0
+                
+                # Remove points that are inside this interior boundary
+                inside_points = inside_points[~inside_interior]
         
         if self.is2D:
             self._x, self._y = inside_points[:, 0].astype(np.float32), inside_points[:, 1].astype(np.float32)
         else:
             self._x, self._y, self._z = inside_points[:, 0].astype(np.float32), inside_points[:, 1].astype(np.float32), inside_points[:, 2].astype(np.float32)
-
 
     def setBoundary(self, boundary_name, xBc, yBc, interior=False, **boundary_conditions):
         """
