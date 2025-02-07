@@ -13,16 +13,16 @@ def main():
     autosave_interval = 1000
     
     # Mesh parameters
-    nx = 40
-    ny = 40
+    nx = 100
+    ny = 100
     n_boundary = 100
 
-    trainedModel = False
+    trainedModel = True
     
     try:
         # Initialize simulation
         airfoil = FlowOverAirfoil(case_name, x_range, y_range, AoA=angle_of_attack)
-        
+
         # Generate mesh
         print("Generating mesh...")
         airfoil.generateMesh(Nx=nx, Ny=ny, NBoundary=n_boundary, sampling_method='random')
