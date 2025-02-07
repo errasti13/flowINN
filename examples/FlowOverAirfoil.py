@@ -8,7 +8,7 @@ def main():
     
     # Simulation parameters
     case_name = "FlowOverAirfoil"
-    epochs = 20000
+    epochs = 1000
     print_interval = 100
     autosave_interval = 5000
     
@@ -17,7 +17,7 @@ def main():
     ny = 40
     n_boundary = 100
 
-    trainedModel = True
+    trainedModel = False
     
     try:
         # Initialize simulation
