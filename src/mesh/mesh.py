@@ -2,6 +2,7 @@ import numpy as np
 from scipy.spatial import Delaunay
 import matplotlib.pyplot as plt  # Add this import at the top
 from typing import Dict, Optional, Union, Tuple
+from src.mesh.meshio import MeshIO # Import MeshIO
 
 class Mesh:
     def __init__(self, is2D: bool = True) -> None:
@@ -13,6 +14,7 @@ class Mesh:
         self._boundaries: dict = {}
         self._interiorBoundaries: dict = {}
         self._is2D: bool = is2D
+        self.meshio = MeshIO(self) # Create MeshIO instance
 
     # Coordinate properties
     @property
@@ -355,3 +357,7 @@ class Mesh:
         plt.title(f'Mesh Visualization\n{domain_size}')
         plt.tight_layout()
         plt.show()
+
+    def write_tecplot(self, filename: str):
+        """Write solution using MeshIO."""
+        self.meshio.write_tecplot(filename)

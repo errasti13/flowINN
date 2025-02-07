@@ -2,16 +2,67 @@ import numpy as np
 from typing import List, Optional
 from src.mesh.mesh import Mesh
 
-class MeshIO(Mesh):
-    def __init__(self, is2D: bool = True) -> None:
+class MeshIO():
+    def __init__(self) -> None:
         """
         Initialize MeshIO class.
         
         Args:
             is2D: Whether the mesh is 2D (True) or 3D (False)
         """
-        super().__init__(is2D)
         self._variables: List[str] = ["X", "Y", "U", "V", "P"]
+
+    @property
+    def x(self) -> np.ndarray:
+        return self._mesh.x
+
+    @property
+    def y(self) -> np.ndarray:
+        return self._mesh.y
+
+    @property
+    def z(self) -> np.ndarray:
+        return self._mesh.z
+
+    @property
+    def solutions(self) -> dict:
+        return self._mesh.solutions
+
+    @solutions.setter
+    def solutions(self, value: dict) -> None:
+        if not isinstance(value, dict):
+            raise TypeError("solutions must be a dictionary")
+        self._mesh.solutions = value
+
+    @property
+    def boundaries(self) -> dict:
+        return self._mesh.boundaries
+
+    @boundaries.setter
+    def boundaries(self, value: dict) -> None:
+        if not isinstance(value, dict):
+            raise TypeError("boundaries must be a dictionary")
+        self._mesh.boundaries = value
+
+    @property
+    def interiorBoundaries(self) -> dict:
+        return self._mesh.interiorBoundaries
+
+    @interiorBoundaries.setter
+    def interiorBoundaries(self, value: dict) -> None:
+        if not isinstance(value, dict):
+            raise TypeError("interiorBoundaries must be a dictionary")
+        self._mesh.interiorBoundaries = value
+        
+    @property
+    def is2D(self) -> bool:
+        return self._mesh.is2D
+
+    @is2D.setter
+    def is2D(self, value: bool) -> None:
+        if not isinstance(value, bool):
+            raise TypeError("is2D must be a boolean")
+        self._mesh.is2D = value
 
     def write_tecplot(self, filename: str, variables: Optional[List[str]] = None) -> None:
         """Write solution in a Paraview-compatible CSV format."""
