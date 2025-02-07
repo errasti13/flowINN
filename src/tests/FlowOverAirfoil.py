@@ -1,10 +1,11 @@
 import numpy as np
 import logging
 from typing import Tuple, Optional
-from src.mesh.meshio import MeshIO  # Change import
+from src.mesh.meshio import MeshIO
 from src.models.model import PINN
 from src.training.loss import NavierStokesLoss
 from src.plot.plot import Plot
+from src.physics.boundary_conditions import InletBC, OutletBC, WallBC  # Add this import
 
 class FlowOverAirfoil:
     def __init__(self, caseName: str, xRange: Tuple[float, float], yRange: Tuple[float, float], AoA: float = 0.0):
@@ -41,6 +42,11 @@ class FlowOverAirfoil:
 
         self.generate_airfoil_coords()
 
+        # Initialize boundary condition objects
+        self.inlet_bc = InletBC("inlet")
+        self.outlet_bc = OutletBC("outlet")
+        self.wall_bc = WallBC("wall")
+
         return
     
     def generate_airfoil_coords(self, N=100, thickness=0.12):
@@ -69,65 +75,65 @@ class FlowOverAirfoil:
         return
     
     def generateMesh(self, Nx: int = 100, Ny: int = 100, NBoundary: int = 100, sampling_method: str = 'random'):
-        """Generate mesh with angle of attack considerations."""
         try:
             if not all(isinstance(x, int) and x > 0 for x in [Nx, Ny, NBoundary]):
                 raise ValueError("Nx, Ny, and NBoundary must be positive integers")
             if sampling_method not in ['random', 'uniform']:
                 raise ValueError("sampling_method must be 'random' or 'uniform'")
                 
-            # Initialize boundaries
+            # Initialize boundaries first
             self._initialize_boundaries()
             
-            # Calculate velocity components based on angle of attack
-            u_inf = np.cos(np.radians(self.AoA))
-            v_inf = np.sin(np.radians(self.AoA))
-            
-            # Create boundary points
+            # Create and validate boundary points
             x_top = np.linspace(self.xRange[0], self.xRange[1], NBoundary)
-            y_top = np.full(NBoundary, self.yRange[1])
+            y_top = np.full_like(x_top, self.yRange[1])
             
             x_bottom = np.linspace(self.xRange[0], self.xRange[1], NBoundary)
-            y_bottom = np.full(NBoundary, self.yRange[0])
+            y_bottom = np.full_like(x_bottom, self.yRange[0])
             
             x_inlet = np.full(NBoundary, self.xRange[0])
             y_inlet = np.linspace(self.yRange[0], self.yRange[1], NBoundary)
             
             x_outlet = np.full(NBoundary, self.xRange[1])
             y_outlet = np.linspace(self.yRange[0], self.yRange[1], NBoundary)
+
+            # Ensure airfoil coordinates are properly shaped
+            x_airfoil = self.xAirfoil.flatten()
+            y_airfoil = self.yAirfoil.flatten()
+
+            # Validate coordinates
+            all_coords = [x_top, y_top, x_bottom, y_bottom, x_inlet, y_inlet, 
+                         x_outlet, y_outlet, x_airfoil, y_airfoil]
             
-            # Set external boundaries with AoA consideration
-            self.mesh.setBoundaryCondition(x_top, y_top, np.full(NBoundary, u_inf), 'u', 'top')
-            self.mesh.setBoundaryCondition(x_top, y_top, np.full(NBoundary, v_inf), 'v', 'top')
+            if any(np.any(np.isnan(coord)) for coord in all_coords):
+                raise ValueError("NaN values detected in boundary coordinates")
+
+            # Update exterior boundaries
+            for name, coords in [
+                ('top', (x_top, y_top)),
+                ('bottom', (x_bottom, y_bottom)),
+                ('Inlet', (x_inlet, y_inlet)),
+                ('Outlet', (x_outlet, y_outlet))
+            ]:
+                if name not in self.mesh.boundaries:
+                    raise KeyError(f"Boundary '{name}' not initialized")
+                self.mesh.boundaries[name].update({
+                    'x': coords[0].astype(np.float32),
+                    'y': coords[1].astype(np.float32)
+                })
+
+            # Update interior boundary (airfoil)
+            if 'Airfoil' not in self.mesh.interiorBoundaries:
+                raise KeyError("Airfoil boundary not initialized")
             
-            self.mesh.setBoundaryCondition(x_bottom, y_bottom, np.full(NBoundary, u_inf), 'u', 'bottom')
-            self.mesh.setBoundaryCondition(x_bottom, y_bottom, np.full(NBoundary, v_inf), 'v', 'bottom')
-            
-            self.mesh.setBoundaryCondition(x_inlet, y_inlet, np.full(NBoundary, u_inf), 'u', 'Inlet')
-            self.mesh.setBoundaryCondition(x_inlet, y_inlet, np.full(NBoundary, v_inf), 'v', 'Inlet')
-            
-            self.mesh.setBoundaryCondition(x_outlet, y_outlet, np.full(NBoundary, u_inf), 'u', 'Outlet')
-            self.mesh.setBoundaryCondition(x_outlet, y_outlet, np.full(NBoundary, v_inf), 'v', 'Outlet')
-            
-            # Set airfoil boundary with no-slip condition
-            n_airfoil_points = len(self.xAirfoil)
-            self.mesh.setBoundaryCondition(
-                self.xAirfoil.flatten(),
-                self.yAirfoil.flatten(),
-                np.zeros(n_airfoil_points),
-                'u',
-                'Airfoil',
-                interior=True
-            )
-            self.mesh.setBoundaryCondition(
-                self.xAirfoil.flatten(),
-                self.yAirfoil.flatten(),
-                np.zeros(n_airfoil_points),
-                'v',
-                'Airfoil',
-                interior=True
-            )
-            
+            self.mesh.interiorBoundaries['Airfoil'].update({
+                'x': x_airfoil.astype(np.float32),
+                'y': y_airfoil.astype(np.float32)
+            })
+
+            # Validate boundary conditions before mesh generation
+            self._validate_boundary_conditions()
+
             # Generate the mesh
             self.mesh.generateMesh(
                 Nx=Nx,
@@ -140,17 +146,86 @@ class FlowOverAirfoil:
             raise
 
     def _initialize_boundaries(self):
-        """Initialize boundary dictionaries."""
+        """Initialize boundaries with proper BC system."""
+        # Calculate velocity components
+        u_inf = float(np.cos(np.radians(self.AoA)))
+        v_inf = float(np.sin(np.radians(self.AoA)))
+        
+        # Initialize exterior boundaries
         self.mesh.boundaries = {
-            'Inlet': {'x': None, 'y': None, 'u': None, 'v': None, 'p': None},
-            'Outlet': {'x': None, 'y': None, 'u': None, 'v': None, 'p': None},
-            'bottom': {'x': None, 'y': None, 'u': None, 'v': None, 'p': None},
-            'top': {'x': None, 'y': None, 'u': None, 'v': None, 'p': None}
+            'Inlet': {
+                'x': None,
+                'y': None,
+                'conditions': {
+                    'u': {'value': u_inf},
+                    'v': {'value': v_inf},
+                    'p': {'gradient': 0.0, 'direction': 'x'}
+                },
+                'bc_type': self.inlet_bc
+            },
+            'Outlet': {
+                'x': None,
+                'y': None,
+                'conditions': {
+                    'u': {'gradient': 0.0, 'direction': 'x'},
+                    'v': {'gradient': 0.0, 'direction': 'x'},
+                    'p': {'value': 0.0}
+                },
+                'bc_type': self.outlet_bc
+            },
+            'top': {
+                'x': None,
+                'y': None,
+                'conditions': {
+                    'u': {'value': u_inf},
+                    'v': {'value': v_inf},
+                    'p': {'gradient': 0.0, 'direction': 'y'}
+                },
+                'bc_type': self.wall_bc
+            },
+            'bottom': {
+                'x': None,
+                'y': None,
+                'conditions': {
+                    'u': {'value': u_inf},
+                    'v': {'value': v_inf},
+                    'p': {'gradient': 0.0, 'direction': 'y'}
+                },
+                'bc_type': self.wall_bc
+            }
         }
+        
+        # Initialize interior boundary (airfoil) separately
         self.mesh.interiorBoundaries = {
-            'Airfoil': {'x': None, 'y': None, 'u': None, 'v': None, 'p': None}
+            'Airfoil': {
+                'x': None,
+                'y': None,
+                'conditions': {
+                    'u': {'value': 0.0},  # No-slip condition
+                    'v': {'value': 0.0},  # No-slip condition
+                    'p': {'gradient': 0.0, 'direction': 'normal'}  # Zero pressure gradient normal to wall
+                },
+                'bc_type': self.wall_bc,
+                'isInterior': True  # Explicitly mark as interior boundary
+            }
         }
-    
+
+    def _validate_boundary_conditions(self):
+        """Validate boundary conditions before mesh generation."""
+        # Check exterior boundaries
+        for name, boundary in self.mesh.boundaries.items():
+            if any(key not in boundary for key in ['x', 'y', 'conditions', 'bc_type']):
+                raise ValueError(f"Missing required fields in boundary {name}")
+            if boundary['x'] is None or boundary['y'] is None:
+                raise ValueError(f"Coordinates not set for boundary {name}")
+
+        # Check interior boundaries
+        for name, boundary in self.mesh.interiorBoundaries.items():
+            if any(key not in boundary for key in ['x', 'y', 'conditions', 'bc_type']):
+                raise ValueError(f"Missing required fields in interior boundary {name}")
+            if boundary['x'] is None or boundary['y'] is None:
+                raise ValueError(f"Coordinates not set for interior boundary {name}")
+
     def getLossFunction(self):
         self.loss = NavierStokesLoss(self.mesh, self.model)
     
