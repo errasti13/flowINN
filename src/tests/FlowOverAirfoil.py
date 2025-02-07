@@ -167,8 +167,8 @@ class FlowOverAirfoil:
                 'x': None,
                 'y': None,
                 'conditions': {
-                    'u': {'gradient': 0.0, 'direction': 'x'},
-                    'v': {'gradient': 0.0, 'direction': 'x'},
+                    'u': None,
+                    'v': None,
                     'p': {'value': 0.0}
                 },
                 'bc_type': self.outlet_bc

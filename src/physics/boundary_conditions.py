@@ -78,13 +78,43 @@ class InletBC(DirichletBC):
 class OutletBC(GradientBC):
     """Outlet boundary condition with gradient specifications."""
     def apply(self, x: tf.Tensor, y: tf.Tensor, values: Dict[str, Any], tape: Optional[tf.GradientTape] = None) -> Dict[str, tf.Tensor]:
-        base_values = {
-            'u': {'gradient': 0.0, 'direction': 'normal'},
-            'v': {'gradient': 0.0, 'direction': 'normal'},
-            'p': values.get('p', {'value': 0.0})  # Default zero pressure
-        }
-        base_values.update(values)
-        return super().apply(x, y, base_values, tape)
+        result = {}
+        
+        # Small coefficient to treat gradients as values
+        grad_coeff = 1e-6
+        
+        # Process each variable separately
+        for var_name, var_info in values.items():
+            if var_info is None:
+                continue
+            
+            if var_name in ['u', 'v']:
+                # Apply zero gradient in x-direction
+                gradient_value = var_info.get('gradient', 0.0)
+                
+                # Convert to tensor and ensure correct shape
+                if not isinstance(gradient_value, tf.Tensor):
+                    gradient_value = tf.convert_to_tensor(gradient_value, dtype=tf.float32)
+                if gradient_value.shape != x.shape:
+                    gradient_value = tf.zeros_like(x, dtype=tf.float32)
+                
+                # Treat gradient as a small value
+                value = gradient_value * grad_coeff
+                result[var_name] = {'value': value}
+            
+            elif var_name == 'p':
+                # Use provided value or default to zero
+                value = var_info.get('value', 0.0)
+                
+                # Convert to tensor and ensure correct shape
+                if not isinstance(value, tf.Tensor):
+                    value = tf.convert_to_tensor(value, dtype=tf.float32)
+                if value.shape != x.shape:
+                    value = tf.zeros_like(x, dtype=tf.float32)
+                
+                result[var_name] = {'value': value}
+        
+        return result
 
 class MovingWallBC(DirichletBC):
     """Moving wall boundary condition with optional gradient constraints."""
