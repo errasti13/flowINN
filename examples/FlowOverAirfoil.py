@@ -8,7 +8,7 @@ def main():
     
     # Simulation parameters
     case_name = "FlowOverAirfoil"
-    epochs = 1000
+    epochs = 10000
     print_interval = 100
     autosave_interval = 1000
     
