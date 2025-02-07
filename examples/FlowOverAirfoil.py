@@ -10,7 +10,7 @@ def main():
     case_name = "FlowOverAirfoil"
     epochs = 1000
     print_interval = 100
-    autosave_interval = 5000
+    autosave_interval = 1000
     
     # Mesh parameters
     nx = 40

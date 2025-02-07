@@ -7,12 +7,12 @@ def main():
     
     # Simulation parameters
     case_name = "LidDrivenCavity"
-    epochs = 1000
+    epochs = 10000
     print_interval = 100
-    autosave_interval = 1000
+    autosave_interval = 10000
     
     # Mesh parameters
-    nx = 60
+    nx = 100
     ny = 100
     n_boundary = 100
 
