@@ -65,7 +65,12 @@ class PINN:
                 print(f"Epoch {epoch + 1}: Loss = {loss.numpy()}")
 
             if (epoch + 1) % autosave_interval == 0:
-                self.model.save(f'trainedModels/{self.eq}.tf')
+                try:
+                    self.model.save(f'trainedModels/{self.eq}.tf')
+                except OSError as e:
+                    print(f"Error saving model: {e}")
+                    print("Check disk space and permissions.")
+                    raise  # Re-raise the exception so the program doesn't continue with a potentially corrupted model.
 
         if plot_loss:
             plt.ioff()  # Turn off interactive mode
