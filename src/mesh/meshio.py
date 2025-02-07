@@ -1,6 +1,5 @@
 import numpy as np
 from typing import List, Optional
-from src.mesh.mesh import Mesh
 
 class MeshIO():
     def __init__(self) -> None:
