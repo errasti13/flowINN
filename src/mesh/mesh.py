@@ -191,45 +191,29 @@ class Mesh:
             raise
 
     def _check_points_in_domain(self, points, x_boundary, y_boundary, z_boundary=None):
-        """Check if points are inside the domain using Delaunay triangulation."""
+        """Check if points are inside the domain and outside interior boundaries."""
         try:
-            if self.is2D or z_boundary is None:
-                # 2D case
-                boundary_points = np.column_stack((x_boundary, y_boundary))
-                triangulation = Delaunay(boundary_points)
-                inside = triangulation.find_simplex(points) >= 0
-            else:
-                # 3D case - use convex hull
-                from scipy.spatial import ConvexHull
-                boundary_points = np.column_stack((x_boundary, y_boundary, z_boundary))
-                hull = ConvexHull(boundary_points)
-                
-                # Use Delaunay for 3D point location
-                triangulation = Delaunay(boundary_points)
-                inside = triangulation.find_simplex(points) >= 0
+            # First check if points are inside exterior boundary
+            boundary_points = np.column_stack((x_boundary, y_boundary))
+            exterior_tri = Delaunay(boundary_points)
+            inside_exterior = exterior_tri.find_simplex(points) >= 0
+            valid_points = points[inside_exterior]
 
-            # Check interior boundaries if they exist
+            # Now check interior boundaries and remove points inside them
             if self._interiorBoundaries:
-                inside_interior = np.zeros_like(inside, dtype=bool)
                 for boundary_data in self._interiorBoundaries.values():
-                    x_interior = np.asarray(boundary_data['x'], dtype=np.float32).flatten()
-                    y_interior = np.asarray(boundary_data['y'], dtype=np.float32).flatten()
+                    x_int = boundary_data['x'].flatten()
+                    y_int = boundary_data['y'].flatten()
+                    interior_points = np.column_stack((x_int, y_int))
                     
-                    if not self.is2D and 'z' in boundary_data:
-                        z_interior = np.asarray(boundary_data['z'], dtype=np.float32).flatten()
-                        interior_points = np.column_stack((x_interior, y_interior, z_interior))
-                    else:
-                        interior_points = np.column_stack((x_interior, y_interior))
-                        
+                    # Create Delaunay triangulation for interior boundary
                     interior_tri = Delaunay(interior_points)
-                    inside_interior = inside_interior | (interior_tri.find_simplex(points) >= 0)
-                
-                # Keep points that are inside exterior but outside all interior boundaries
-                valid_mask = inside & ~inside_interior
-            else:
-                valid_mask = inside
+                    
+                    # Remove points that are inside this interior boundary
+                    inside_interior = interior_tri.find_simplex(valid_points) >= 0
+                    valid_points = valid_points[~inside_interior]
 
-            return points[valid_mask]
+            return valid_points
 
         except Exception as e:
             print(f"Debug: Error checking points in domain: {str(e)}")

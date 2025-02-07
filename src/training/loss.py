@@ -154,29 +154,63 @@ class NavierStokesLoss:
 
         total_loss += self.boundaryWeight * boundary_loss
 
-        # Compute interior boundary losses separately
+        # Compute interior boundary losses with higher weight
         interior_loss = 0.0
-        if self.mesh.interiorBoundaries:
-            for boundary_name, boundary_data in self.mesh.interiorBoundaries.items():
-                try:
-                    xBc = self.convert_and_reshape(boundary_data['x'])
-                    yBc = self.convert_and_reshape(boundary_data['y'])
-                    uBc, vBc, pBc = self.imposeBoundaryCondition(
-                        boundary_data.get('u'), 
-                        boundary_data.get('v'), 
-                        boundary_data.get('p')
-                    )
-
-                    u_loss, v_loss, p_loss = self.computeBoundaryLoss(
-                        self.model.model, xBc, yBc, uBc, vBc, pBc
-                    )
-                    interior_loss += (u_loss + v_loss + p_loss)
+        interior_weight = 2.0  # Higher weight for interior boundaries
+        
+        for boundary_name, boundary_data in self.mesh.interiorBoundaries.items():
+            try:
+                # Get boundary coordinates
+                x_int = tf.reshape(tf.convert_to_tensor(boundary_data['x'], dtype=tf.float32), [-1, 1])
+                y_int = tf.reshape(tf.convert_to_tensor(boundary_data['y'], dtype=tf.float32), [-1, 1])
                 
-                except Exception as e:
-                    print(f"Warning: Error processing boundary {boundary_name}: {str(e)}")
-                    continue
+                # Get boundary conditions object and values
+                bc_type = boundary_data['bc_type']
+                conditions = boundary_data['conditions']
 
-            total_loss += self.boundaryWeight * interior_loss
+                with tf.GradientTape(persistent=True) as int_tape:
+                    int_tape.watch([x_int, y_int])
+                    uvp_int = self.model.model(tf.concat([x_int, y_int], axis=1))
+                    
+                    u_int = uvp_int[:, 0]
+                    v_int = uvp_int[:, 1]
+                    p_int = uvp_int[:, 2]
+
+                    # Apply interior boundary conditions
+                    bc_results = bc_type.apply(x_int, y_int, conditions, int_tape)
+                    
+                    # Compute losses for each variable with higher weight
+                    for var_name, bc_info in bc_results.items():
+                        if bc_info is None:
+                            continue
+                            
+                        if 'value' in bc_info:
+                            target_value = tf.cast(bc_info['value'], tf.float32)
+                            if var_name == 'u':
+                                interior_loss += tf.reduce_mean(tf.square(u_int - target_value))
+                            elif var_name == 'v':
+                                interior_loss += tf.reduce_mean(tf.square(v_int - target_value))
+                            elif var_name == 'p':
+                                interior_loss += tf.reduce_mean(tf.square(p_int - target_value))
+
+                        if 'gradient' in bc_info:
+                            target_gradient = tf.cast(bc_info['gradient'], tf.float32)
+                            direction = bc_info['direction']
+                            
+                            if direction == 'normal':
+                                # Calculate normal direction based on boundary geometry
+                                dx = int_tape.gradient(uvp_int, x_int)
+                                dy = int_tape.gradient(uvp_int, y_int)
+                                if var_name == 'p':
+                                    interior_loss += tf.reduce_mean(tf.square(dx[:, 2] - target_gradient))
+                                    interior_loss += tf.reduce_mean(tf.square(dy[:, 2] - target_gradient))
+
+            except Exception as e:
+                print(f"Warning: Error processing interior boundary {boundary_name}: {str(e)}")
+                continue
+
+        # Add interior boundary loss with higher weight
+        total_loss += interior_weight * interior_loss
 
         return total_loss
 
