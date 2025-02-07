@@ -14,6 +14,12 @@ class Mesh:
         self._boundaries: dict = {}
         self._interiorBoundaries: dict = {}
         self._is2D: bool = is2D
+        self.meshio: MeshIO = None
+
+    def _create_meshio(self):
+        """Create MeshIO instance if it doesn't exist."""
+        if self.meshio is None:
+            self.meshio = MeshIO(self)
 
     # Coordinate properties
     @property
@@ -359,6 +365,5 @@ class Mesh:
 
     def write_tecplot(self, filename: str):
         """Write solution using MeshIO."""
-        if self.meshio is None:
-            self.meshio = MeshIO(self) # Create MeshIO instance
+        self._create_meshio()
         self.meshio.write_tecplot(filename)

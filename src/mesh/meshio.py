@@ -2,13 +2,14 @@ import numpy as np
 from typing import List, Optional
 
 class MeshIO():
-    def __init__(self) -> None:
+    def __init__(self, mesh) -> None:
         """
         Initialize MeshIO class.
         
         Args:
             is2D: Whether the mesh is 2D (True) or 3D (False)
         """
+        self._mesh = mesh
         self._variables: List[str] = ["X", "Y", "U", "V", "P"]
 
     @property
