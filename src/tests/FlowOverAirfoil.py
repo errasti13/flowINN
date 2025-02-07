@@ -1,11 +1,11 @@
 import numpy as np
 import logging
 from typing import Tuple, Optional
-from src.mesh.meshio import MeshIO
+from src.mesh.mesh import Mesh
 from src.models.model import PINN
 from src.training.loss import NavierStokesLoss
 from src.plot.plot import Plot
-from src.physics.boundary_conditions import InletBC, OutletBC, WallBC  # Add this import
+from src.physics.boundary_conditions import InletBC, OutletBC, WallBC 
 
 class FlowOverAirfoil:
     def __init__(self, caseName: str, xRange: Tuple[float, float], yRange: Tuple[float, float], AoA: float = 0.0):
@@ -26,7 +26,7 @@ class FlowOverAirfoil:
         self.logger = logging.getLogger(__name__)
         self.is2D = True
         self.problemTag = caseName
-        self.mesh = MeshIO(self.is2D)  # Use MeshIO instead of Mesh
+        self.mesh = Mesh(self.is2D)
         self.model = PINN(input_shape=2, output_shape=3, eq = self.problemTag, layers=[20,40,60,40,20])
 
         self.loss = None
@@ -169,7 +169,7 @@ class FlowOverAirfoil:
                 'conditions': {
                     'u': None,
                     'v': None,
-                    'p': {'value': 0.0}
+                    'p': None
                 },
                 'bc_type': self.outlet_bc
             },
