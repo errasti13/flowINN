@@ -1,10 +1,11 @@
 import numpy as np
 import logging
 from typing import Tuple, Optional
-from src.mesh.meshio import MeshIO
+from src.mesh.mesh import Mesh
 from src.models.model import PINN
 from src.training.loss import NavierStokesLoss
 from src.plot.plot import Plot
+from src.physics.boundary_conditions import InletBC, OutletBC, WallBC
 
 class MinimalChannelFlow:
     def __init__(self, caseName: str, xRange: Tuple[float, float], 
@@ -26,7 +27,7 @@ class MinimalChannelFlow:
         self.logger = logging.getLogger(__name__)
         self.is2D = False
         self.problemTag = caseName
-        self.mesh = MeshIO(self.is2D)
+        self.mesh = Mesh(self.is2D)
         self.model = PINN(input_shape=3, output_shape=4, eq=self.problemTag, layers=[30,60,90,60,30])
 
         self.loss = None
@@ -35,6 +36,11 @@ class MinimalChannelFlow:
         self.xRange = xRange
         self.yRange = yRange
         self.zRange = zRange
+
+        # Initialize boundary condition objects
+        self.inlet_bc = InletBC("inlet")
+        self.outlet_bc = OutletBC("outlet")
+        self.wall_bc = WallBC("wall")
 
     def generateMesh(self, Nx: int = 50, Ny: int = 50, Nz: int = 50, 
                     NBoundary: int = 100, sampling_method: str = 'random'):
@@ -65,14 +71,68 @@ class MinimalChannelFlow:
             raise
 
     def _initialize_boundaries(self):
-        """Initialize boundary dictionaries for 3D channel."""
+        """Initialize boundary dictionaries with proper BC system."""
         self.mesh.boundaries = {
-            'Inlet': {'x': None, 'y': None, 'z': None, 'u': None, 'v': None, 'w': None, 'p': None},
-            'Outlet': {'x': None, 'y': None, 'z': None, 'u': None, 'v': None, 'w': None, 'p': None},
-            'Bottom': {'x': None, 'y': None, 'z': None, 'u': None, 'v': None, 'w': None, 'p': None},
-            'Top': {'x': None, 'y': None, 'z': None, 'u': None, 'v': None, 'w': None, 'p': None},
-            'Front': {'x': None, 'y': None, 'z': None, 'u': None, 'v': None, 'w': None, 'p': None},
-            'Back': {'x': None, 'y': None, 'z': None, 'u': None, 'v': None, 'w': None, 'p': None}
+            'Inlet': {
+                'x': None, 'y': None, 'z': None,
+                'conditions': {
+                    'u': {'value': 1.0},
+                    'v': {'value': 0.0},
+                    'w': {'value': 0.0},
+                    'p': {'gradient': 0.0, 'direction': 'x'}
+                },
+                'bc_type': self.inlet_bc
+            },
+            'Outlet': {
+                'x': None, 'y': None, 'z': None,
+                'conditions': {
+                    'u': {'gradient': 0.0, 'direction': 'x'},
+                    'v': {'gradient': 0.0, 'direction': 'x'},
+                    'w': {'gradient': 0.0, 'direction': 'x'},
+                    'p': {'value': 0.0}
+                },
+                'bc_type': self.outlet_bc
+            },
+            'Bottom': {
+                'x': None, 'y': None, 'z': None,
+                'conditions': {
+                    'u': {'value': 0.0},
+                    'v': {'value': 0.0},
+                    'w': {'value': 0.0},
+                    'p': {'gradient': 0.0, 'direction': 'z'}
+                },
+                'bc_type': self.wall_bc
+            },
+            'Top': {
+                'x': None, 'y': None, 'z': None,
+                'conditions': {
+                    'u': {'value': 1.0},
+                    'v': {'value': 0.0},
+                    'w': {'value': 0.0},
+                    'p': {'gradient': 0.0, 'direction': 'z'}
+                },
+                'bc_type': self.wall_bc
+            },
+            'Front': {
+                'x': None, 'y': None, 'z': None,
+                'conditions': {
+                    'u': {'gradient': 0.0, 'direction': 'y'},
+                    'v': {'gradient': 0.0, 'direction': 'y'},
+                    'w': {'gradient': 0.0, 'direction': 'y'},
+                    'p': {'gradient': 0.0, 'direction': 'y'}
+                },
+                'bc_type': self.wall_bc
+            },
+            'Back': {
+                'x': None, 'y': None, 'z': None,
+                'conditions': {
+                    'u': {'gradient': 0.0, 'direction': 'y'},
+                    'v': {'gradient': 0.0, 'direction': 'y'},
+                    'w': {'gradient': 0.0, 'direction': 'y'},
+                    'p': {'gradient': 0.0, 'direction': 'y'}
+                },
+                'bc_type': self.wall_bc
+            }
         }
 
     def _set_channel_boundaries(self, NBoundary: int):
