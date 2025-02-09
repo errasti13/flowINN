@@ -9,7 +9,7 @@ def main():
     z_range = (0.0, 1.0)   # Channel width
     
     # Training parameters
-    epochs = 100000
+    epochs = 1000
     print_interval = 100
     autosave_interval = 10000
 

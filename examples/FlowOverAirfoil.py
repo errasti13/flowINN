@@ -17,7 +17,7 @@ def main():
     ny = 100
     n_boundary = 100
 
-    trainedModel = True
+    trainedModel = False
     
     try:
         # Initialize simulation
