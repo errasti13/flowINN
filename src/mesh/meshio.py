@@ -1,6 +1,7 @@
 import numpy as np
 from typing import List, Optional, Dict
-from src.mesh.mesh import Mesh  # Import Mesh class
+# Remove the import of the Mesh class to break the circular dependency
+#from src.mesh.mesh import Mesh  # Import Mesh class
 
 
 class MeshIO:
@@ -12,17 +13,15 @@ class MeshIO:
         variables (List[str]): List of variable names to be written to file.
     """
 
-    def __init__(self, mesh: Mesh) -> None:
+    def __init__(self, mesh) -> None:
         """
         Initializes a new MeshIO object.
 
         Args:
             mesh (Mesh): The mesh object to which this MeshIO instance is associated.
         """
-        if not isinstance(mesh, Mesh):
-            raise TypeError("mesh must be an instance of the Mesh class")
-
-        self._mesh: Mesh = mesh
+        
+        self._mesh = mesh
         self._variables: List[str] = ["X", "Y", "U", "V", "P"]
 
     @property
