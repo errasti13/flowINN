@@ -136,7 +136,7 @@ class PINN:
 
             if (epoch + 1) % autosave_interval == 0:
                 try:
-                    self.model.save(f'trainedModels/{self.eq}.tf')
+                    self.model.save(f'trainedModels/{self.eq}.keras')
                 except OSError as e:
                     print(f"Error saving model: {e}")
                     print("Check disk space and permissions.")
