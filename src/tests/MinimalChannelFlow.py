@@ -28,7 +28,7 @@ class MinimalChannelFlow:
         self.is2D = False
         self.problemTag = caseName
         self.mesh = Mesh(self.is2D)
-        self.model = PINN(input_shape=3, output_shape=4, eq=self.problemTag, layers=[30,60,90,60,30])
+        self.model = PINN(input_shape=(3,), output_shape=4, eq=self.problemTag, layers=[30,60,90,60,30])
 
         self.loss = None
         self.Plot = None
