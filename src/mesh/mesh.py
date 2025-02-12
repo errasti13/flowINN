@@ -288,12 +288,11 @@ class Mesh:
                 x_rand = np.random.uniform(np.min(x_boundary), np.max(x_boundary), size=Nt)
                 y_rand = np.random.uniform(np.min(y_boundary), np.max(y_boundary), size=Nt)
 
-                if not self.is2D:
-                    if z_boundary is None:
-                        raise ValueError("z_boundary cannot be None for 3D meshes")
-                    points = np.column_stack((x_boundary, y_boundary, z_boundary))
+                if not self.is2D and z_boundary is not None:
+                    z_rand = np.random.uniform(np.min(z_boundary), np.max(z_boundary), size=Nt)
+                    points = np.column_stack((x_rand, y_rand, z_rand))
                 else:
-                    points = np.column_stack((x_boundary, y_boundary))
+                    points = np.column_stack((x_rand, y_rand))
 
 
                 valid_points = self._check_points_in_domain(points, x_boundary, y_boundary, z_boundary)
