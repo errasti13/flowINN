@@ -27,7 +27,7 @@ class FlowOverAirfoil:
         self.is2D = True
         self.problemTag = caseName
         self.mesh = Mesh(self.is2D)
-        self.model = PINN(input_shape=2, output_shape=3, eq = self.problemTag, layers=[20,40,60,40,20])
+        self.model = PINN(input_shape=(2,), output_shape=3, eq = self.problemTag, layers=[20,40,60,40,20])
 
         self.loss = None
         self.Plot = None
