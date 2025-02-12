@@ -135,6 +135,7 @@ class PINN:
                 print(f"Epoch {epoch + 1}: Loss = {loss.numpy()}")
 
             if (epoch + 1) % autosave_interval == 0:
+                os.makedirs('trainedModels', exist_ok=True)
                 try:
                     self.model.save(f'trainedModels/{self.eq}.keras')
                 except OSError as e:
