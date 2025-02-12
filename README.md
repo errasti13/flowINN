@@ -16,7 +16,9 @@ fl0wINN is a Python package designed for investigating multi-scale turbulent flo
 To install the required dependencies, run:
 
 ```bash
-pip install -r requirements.txt
+git clone https://github.com/errasti13/flowINN.git
+cd flowINN
+pip install .
 ```
 
 ## Usage
