@@ -140,27 +140,32 @@ class MeshIO:
         Args:
             filename (str): The name of the Tecplot file to write.
             variables (Optional[List[str]]): Optional list of variable names to write.
-                                             If None, the default variables will be used.
+                                             If None, all variables in solutions will be used.
 
         Raises:
             IOError: If writing to the file fails.
         """
-        if variables:
-            self._variables = variables
-
         try:
             x = self.x.flatten()
             y = self.y.flatten()
             data_dict: Dict[str, np.ndarray] = {}
 
+            # Add coordinates
             data_dict['x'] = x
             data_dict['y'] = y
+            if not self.is2D and self.z is not None:
+                data_dict['z'] = self.z.flatten()
 
-            for var in ['u', 'v', 'p']:
-                if var in self.solutions:
-                    data_dict[var] = self.solutions[var].flatten()
+            # Add all solution variables
+            for var_name, var_data in self.solutions.items():
+                data_dict[var_name] = var_data.flatten()
+
+            if variables:  # If specific variables are requested, filter data_dict
+                filtered_dict = {k: data_dict[k] for k in variables if k in data_dict}
+                if filtered_dict:
+                    data_dict = filtered_dict
                 else:
-                    data_dict[var] = np.zeros_like(x)
+                    raise ValueError("None of the specified variables found in the solution data")
 
             dtype = [(name, 'float64') for name in data_dict.keys()]
             structured_data = np.zeros(len(x), dtype=dtype)
