@@ -1,56 +1,18 @@
 import tensorflow as tf
+from typing import Tuple, Union, Optional
+from abc import ABC, abstractmethod
 
 
-class NavierStokes3D:
-    def __init__(self, nu = 0.01):
-        self.nu = nu  # kinematic viscosity
-
-    def get_residuals(self, u, v, w, p, x, y, z, tape):
-        """Calculate all NS residuals"""
-
-        tape.watch([x, y])
-        u_x = tape.gradient(u, x)
-        u_y = tape.gradient(u, y)
-        u_z = tape.gradient(u, z)
-        v_x = tape.gradient(v, x)
-        v_y = tape.gradient(v, y)
-        v_z = tape.gradient(v, z)
-        w_x = tape.gradient(w, x)
-        w_y = tape.gradient(w, y)
-        w_z = tape.gradient(w, z)
-        p_x = tape.gradient(p, x)
-        p_y = tape.gradient(p, y)
-        p_z = tape.gradient(p, z)
-
-        # Compute second derivatives (second order)
-        u_xx = tape.gradient(u_x, x)
-        u_yy = tape.gradient(u_y, y)
-        u_zz = tape.gradient(u_z, z)
-        v_xx = tape.gradient(v_x, x)
-        v_yy = tape.gradient(v_y, y)
-        v_zz = tape.gradient(v_z, z)
-        w_xx = tape.gradient(w_x, x)
-        w_yy = tape.gradient(w_y, y)
-        w_zz = tape.gradient(w_z, z)
-
-        # Continuity equation
-        continuity = u_x + v_y + w_z
-
-        # Momentum equations
-        momentum_u = u * u_x + v * u_y + p_x - self.nu * (u_xx + u_yy + u_zz)
-        momentum_v = u * v_x + v * v_y + p_y - self.nu * (v_xx + v_yy + v_zz)
-        momentum_w = u * w_x + v * w_y + p_z - self.nu * (w_xx + w_yy + w_zz)
-
-        return continuity, momentum_u, momentum_v, momentum_w
+class NavierStokes(ABC):
+    """Base class for Navier-Stokes equations."""
     
-
-class NavierStokes2D:
     def __init__(self, nu: float = 0.01) -> None:
         self._nu: float = None
         self.nu = nu
 
     @property
     def nu(self) -> float:
+        """Kinematic viscosity coefficient."""
         return self._nu
 
     @nu.setter
@@ -61,36 +23,31 @@ class NavierStokes2D:
             raise ValueError("Kinematic viscosity (nu) must be positive")
         self._nu = float(value)
 
-    def _compute_first_derivatives(self, u, v, p, x, y, tape) -> tuple:
-        """Compute first-order derivatives."""
-        u_x = tape.gradient(u, x)
-        u_y = tape.gradient(u, y)
-        v_x = tape.gradient(v, x)
-        v_y = tape.gradient(v, y)
-        p_x = tape.gradient(p, x)
-        p_y = tape.gradient(p, y)
-        return u_x, u_y, v_x, v_y, p_x, p_y
+    def _compute_first_derivatives(self, variables: list, coordinates: list, tape) -> list:
+        """Compute first-order derivatives for all variables with respect to all coordinates."""
+        derivatives = []
+        for var in variables:
+            for coord in coordinates:
+                derivatives.append(tape.gradient(var, coord))
+        return derivatives
 
-    def _compute_second_derivatives(self, u_x, u_y, v_x, v_y, x, y, tape) -> tuple:
+    def _compute_second_derivatives(self, first_derivatives: list, coordinates: list, tape) -> list:
         """Compute second-order derivatives."""
-        u_xx = tape.gradient(u_x, x)
-        u_yy = tape.gradient(u_y, y)
-        v_xx = tape.gradient(v_x, x)
-        v_yy = tape.gradient(v_y, y)
-        return u_xx, u_yy, v_xx, v_yy
+        return [tape.gradient(d, coord) for d in first_derivatives for coord in coordinates]
 
-    def _compute_continuity(self, u_x: tf.Tensor, v_y: tf.Tensor) -> tf.Tensor:
-        """Compute continuity equation residual."""
-        return u_x + v_y
+    @abstractmethod
+    def get_residuals(self, *args, **kwargs) -> Tuple[tf.Tensor, ...]:
+        """Calculate Navier-Stokes residuals."""
+        pass
 
-    def _compute_momentum(self, u, v, u_x, u_y, v_x, v_y, u_xx, u_yy, v_xx, v_yy, p_x, p_y) -> tuple:
-        """Compute momentum equation residuals."""
-        momentum_x = (u * u_x + v * u_y) + p_x - self.nu * (u_xx + u_yy)
-        momentum_y = (u * v_x + v * v_y) + p_y - self.nu * (v_xx + v_yy)
-        return momentum_x, momentum_y
 
-    def get_residuals(self, u, v, p, x, y, tape) -> tuple:
-        """Calculate Navier-Stokes residuals.
+class NavierStokes2D(NavierStokes):
+    """2D Navier-Stokes equations solver."""
+
+    def get_residuals(self, u: tf.Tensor, v: tf.Tensor, p: tf.Tensor, 
+                     x: tf.Tensor, y: tf.Tensor, tape) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
+        """
+        Calculate 2D Navier-Stokes residuals.
         
         Args:
             u, v: Velocity components
@@ -99,18 +56,69 @@ class NavierStokes2D:
             tape: Gradient tape for automatic differentiation
             
         Returns:
-            tuple: (continuity, momentum_x, momentum_y) residuals
+            Tuple[tf.Tensor, tf.Tensor, tf.Tensor]: (continuity, momentum_x, momentum_y) residuals
         """
         tape.watch([x, y])
         
-        # Compute derivatives
-        u_x, u_y, v_x, v_y, p_x, p_y = self._compute_first_derivatives(u, v, p, x, y, tape)
-        u_xx, u_yy, v_xx, v_yy = self._compute_second_derivatives(u_x, u_y, v_x, v_y, x, y, tape)
-        
-        # Compute residuals
-        continuity = self._compute_continuity(u_x, v_y)
-        momentum_x, momentum_y = self._compute_momentum(
-            u, v, u_x, u_y, v_x, v_y, u_xx, u_yy, v_xx, v_yy, p_x, p_y
+        # First derivatives
+        [u_x, u_y, v_x, v_y, p_x, p_y] = self._compute_first_derivatives(
+            [u, v, p], [x, y], tape
         )
         
+        # Second derivatives
+        [u_xx, u_xy, u_yx, u_yy, v_xx, v_xy, v_yx, v_yy] = self._compute_second_derivatives(
+            [u_x, u_y, v_x, v_y], [x, y], tape
+        )
+
+        # Continuity equation
+        continuity = u_x + v_y
+
+        # Momentum equations
+        momentum_x = u * u_x + v * u_y + p_x - self.nu * (u_xx + u_yy)
+        momentum_y = u * v_x + v * v_y + p_y - self.nu * (v_xx + v_yy)
+
         return continuity, momentum_x, momentum_y
+
+
+class NavierStokes3D(NavierStokes):
+    """3D Navier-Stokes equations solver."""
+
+    def get_residuals(self, u: tf.Tensor, v: tf.Tensor, w: tf.Tensor, p: tf.Tensor,
+                     x: tf.Tensor, y: tf.Tensor, z: tf.Tensor, tape) -> Tuple[tf.Tensor, ...]:
+        """
+        Calculate 3D Navier-Stokes residuals.
+        
+        Args:
+            u, v, w: Velocity components
+            p: Pressure
+            x, y, z: Spatial coordinates
+            tape: Gradient tape for automatic differentiation
+            
+        Returns:
+            Tuple[tf.Tensor, ...]: (continuity, momentum_x, momentum_y, momentum_z) residuals
+        """
+        tape.watch([x, y, z])
+        
+        # First derivatives
+        [u_x, u_y, u_z, v_x, v_y, v_z, w_x, w_y, w_z, p_x, p_y, p_z] = self._compute_first_derivatives(
+            [u, v, w, p], [x, y, z], tape
+        )
+        
+        # Second derivatives
+        [u_xx, u_yy, u_zz, v_xx, v_yy, v_zz, w_xx, w_yy, w_zz] = [
+            tape.gradient(d, c) for d, c in [
+                (u_x, x), (u_y, y), (u_z, z),
+                (v_x, x), (v_y, y), (v_z, z),
+                (w_x, x), (w_y, y), (w_z, z)
+            ]
+        ]
+
+        # Continuity equation
+        continuity = u_x + v_y + w_z
+
+        # Momentum equations
+        momentum_x = u * u_x + v * u_y + w * u_z + p_x - self.nu * (u_xx + u_yy + u_zz)
+        momentum_y = u * v_x + v * v_y + w * v_z + p_y - self.nu * (v_xx + v_yy + v_zz)
+        momentum_z = u * w_x + v * w_y + w * w_z + p_z - self.nu * (w_xx + w_yy + w_zz)
+
+        return continuity, momentum_x, momentum_y, momentum_z
