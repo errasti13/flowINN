@@ -12,11 +12,13 @@ def main():
     epochs = 1000
     print_interval = 100
     autosave_interval = 10000
+    
 
     # Mesh parameters
-    nx = 30
-    ny = 15
-    nz = 20
+    nx = 50
+    ny = 30
+    nz = 50
+    num_batches = 10
     n_boundary = 100
 
     trainedModel = False
@@ -39,7 +41,8 @@ def main():
             print("Starting training...")
             channel.train(epochs=epochs, 
                         print_interval=print_interval,
-                        autosaveInterval=autosave_interval)
+                        autosaveInterval=autosave_interval,
+                        num_batches=num_batches)  # Add num_batches parameter
         
         # Predict and visualize
         print("Predicting flow field...")

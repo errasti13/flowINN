@@ -11,10 +11,12 @@ def main():
     print_interval = 100
     autosave_interval = 10000
     
+    
     # Mesh parameters
-    nx = 100
-    ny = 100
+    nx = 200
+    ny = 200
     n_boundary = 100
+    num_batches = 5
 
     trainedModel = False
     
@@ -34,7 +36,8 @@ def main():
             print("Starting training...")
             cavity.train(epochs=epochs, 
                         print_interval=print_interval,
-                        autosaveInterval=autosave_interval)
+                        autosaveInterval=autosave_interval,
+                        num_batches=num_batches)  # Add num_batches parameter
         
         # Predict and visualize
         print("Predicting flow field...")
