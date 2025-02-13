@@ -72,43 +72,79 @@ class PINN:
             decay_rate=0.9
         )
 
+    def generate_batch(self, mesh, num_batches):
+        """Generate a random batch of points from the mesh."""
+        total_points = len(mesh.x)
+        batch_size = total_points // num_batches
+        indices = np.random.choice(total_points, size=batch_size, replace=False)
+        
+        if mesh.is2D:
+            return (tf.convert_to_tensor(mesh.x[indices], dtype=tf.float32),
+                   tf.convert_to_tensor(mesh.y[indices], dtype=tf.float32))
+        else:
+            return (tf.convert_to_tensor(mesh.x[indices], dtype=tf.float32),
+                   tf.convert_to_tensor(mesh.y[indices], dtype=tf.float32),
+                   tf.convert_to_tensor(mesh.z[indices], dtype=tf.float32))
+
+    def generate_batches(self, mesh, num_batches):
+        """Generate all batches from the mesh."""
+        total_points = len(mesh.x)
+        indices = np.random.permutation(total_points)  # Shuffle all indices
+        batch_size = total_points // num_batches
+        
+        batches = []
+        for i in range(num_batches):
+            start_idx = i * batch_size
+            end_idx = start_idx + batch_size if i < num_batches - 1 else total_points
+            batch_indices = indices[start_idx:end_idx]
+            
+            if mesh.is2D:
+                batch = (tf.convert_to_tensor(mesh.x[batch_indices], dtype=tf.float32),
+                        tf.convert_to_tensor(mesh.y[batch_indices], dtype=tf.float32))
+            else:
+                batch = (tf.convert_to_tensor(mesh.x[batch_indices], dtype=tf.float32),
+                        tf.convert_to_tensor(mesh.y[batch_indices], dtype=tf.float32),
+                        tf.convert_to_tensor(mesh.z[batch_indices], dtype=tf.float32))
+            batches.append(batch)
+        
+        return batches
+
     @tf.function(jit_compile=True)
-    def train_step(self, loss_function: Callable[[], tf.Tensor]) -> tf.Tensor:
+    def train_step(self, loss_function, batch_data) -> tf.Tensor:
         """
-        Performs a single training step.
+        Performs a single training step on a batch.
 
         Args:
-            loss_function (Callable[[], tf.Tensor]): A callable that computes the loss.
-
-        Returns:
-            tf.Tensor: The computed loss.
+            loss_function: A callable that computes the loss
+            batch_data: Tuple containing the batch data
         """
         with tf.GradientTape() as tape:
-            loss: tf.Tensor = loss_function()  # Call the loss function here to compute the loss
-        gradients: List[tf.Tensor] = tape.gradient(loss, self.model.trainable_variables)
+            # Pass batch_data as a parameter to the loss function context
+            loss = loss_function(batch_data=batch_data)
+        gradients = tape.gradient(loss, self.model.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
         return loss
 
-    def train(self, loss_function: Callable[[], tf.Tensor], epochs: int = 1000, print_interval: int = 100,
-              autosave_interval: int = 100, plot_loss: bool = False) -> None:
+    def train(self, loss_function, mesh, epochs: int = 1000, num_batches: int = ,
+              print_interval: int = 100, autosave_interval: int = 100,
+              plot_loss: bool = False) -> None:
         """
-        Trains the PINN model.
+        Trains the PINN model using batch training.
 
         Args:
-            loss_function (Callable[[], tf.Tensor]): A callable that computes the loss.
-            epochs (int): The number of epochs to train for. Defaults to 1000.
-            print_interval (int): The interval at which to print the loss. Defaults to 100.
-            autosave_interval (int): The interval at which to save the model. Defaults to 100.
-            plot_loss (bool): Whether to plot the loss during training. Defaults to False.
-
-        Raises:
-            OSError: If there is an error saving the model.
+            loss_function: A callable that computes the loss
+            mesh: The mesh object containing the domain points
+            epochs: Number of epochs to train
+            num_batches: Number of batches to divide the data into
+            print_interval: Interval for printing progress
+            autosave_interval: Interval for saving the model
+            plot_loss: Whether to plot the loss during training
         """
-        loss_history: List[float] = []
-        epoch_history: List[int] = []
+        loss_history = []
+        epoch_history = []
 
         if plot_loss:
-            plt.ion()  # Turn on interactive mode
+            plt.ion()
             fig, ax = plt.subplots()
             ax.set_xlabel('Epoch')
             ax.set_ylabel('Loss')
@@ -118,10 +154,20 @@ class PINN:
             plt.legend()
 
         for epoch in range(epochs):
-            loss: tf.Tensor = self.train_step(loss_function)
+            # Generate all batches for this epoch
+            batches = self.generate_batches(mesh, num_batches)
+            epoch_loss = 0.0
+            
+            # Train on each batch
+            for batch_data in batches:
+                batch_loss = self.train_step(loss_function, batch_data)
+                epoch_loss += batch_loss
+
+            # Average loss over all batches
+            epoch_loss = epoch_loss / num_batches
 
             if (epoch + 1) % print_interval == 0:
-                loss_history.append(loss.numpy())
+                loss_history.append(epoch_loss.numpy())
                 epoch_history.append(epoch + 1)
 
                 if plot_loss:
@@ -132,7 +178,7 @@ class PINN:
                     plt.draw()
                     plt.pause(0.001)
 
-                print(f"Epoch {epoch + 1}: Loss = {loss.numpy()}")
+                print(f"Epoch {epoch + 1}: Loss = {epoch_loss.numpy()}")
 
             if (epoch + 1) % autosave_interval == 0:
                 os.makedirs('trainedModels', exist_ok=True)
@@ -140,11 +186,10 @@ class PINN:
                     self.model.save(f'trainedModels/{self.eq}.keras')
                 except OSError as e:
                     print(f"Error saving model: {e}")
-                    print("Check disk space and permissions.")
-                    raise  # Re-raise the exception so the program doesn't continue with a potentially corrupted model.
+                    raise
 
         if plot_loss:
-            plt.ioff()  # Turn off interactive mode
+            plt.ioff()
             plt.close()
 
     def predict(self, X: np.ndarray) -> np.ndarray:

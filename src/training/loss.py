@@ -62,16 +62,22 @@ class NavierStokesLoss:
             raise ValueError("nu must be positive")
         self._nu = float(value)
 
-    def loss_function(self):
+    def loss_function(self, batch_data=None):
         """Compute combined physics and boundary condition losses"""
         if self.mesh.is2D:
-            return self.loss_function2D()
+            return self.loss_function2D(batch_data)
         else:
-            return self.loss_function3D()
+            return self.loss_function3D(batch_data)
 
-    def loss_function2D(self):
-        X = tf.reshape(tf.convert_to_tensor(self.mesh.x, dtype=tf.float32), [-1, 1])
-        Y = tf.reshape(tf.convert_to_tensor(self.mesh.y, dtype=tf.float32), [-1, 1])
+    def loss_function2D(self, batch_data=None):
+        """Compute combined physics and boundary losses"""
+        if batch_data is None:
+            X = tf.reshape(tf.convert_to_tensor(self.mesh.x, dtype=tf.float32), [-1, 1])
+            Y = tf.reshape(tf.convert_to_tensor(self.mesh.y, dtype=tf.float32), [-1, 1])
+        else:
+            X, Y = batch_data
+            X = tf.reshape(X, [-1, 1])
+            Y = tf.reshape(Y, [-1, 1])
 
         total_loss = 0.0
 
@@ -214,11 +220,17 @@ class NavierStokesLoss:
 
         return total_loss
 
-    def loss_function3D(self):
+    def loss_function3D(self, batch_data=None):
         """3D version of the loss function."""
-        X = tf.reshape(tf.convert_to_tensor(self.mesh.x, dtype=tf.float32), [-1, 1])
-        Y = tf.reshape(tf.convert_to_tensor(self.mesh.y, dtype=tf.float32), [-1, 1])
-        Z = tf.reshape(tf.convert_to_tensor(self.mesh.z, dtype=tf.float32), [-1, 1])
+        if batch_data is None:
+            X = tf.reshape(tf.convert_to_tensor(self.mesh.x, dtype=tf.float32), [-1, 1])
+            Y = tf.reshape(tf.convert_to_tensor(self.mesh.y, dtype=tf.float32), [-1, 1])
+            Z = tf.reshape(tf.convert_to_tensor(self.mesh.z, dtype=tf.float32), [-1, 1])
+        else:
+            X, Y, Z = batch_data
+            X = tf.reshape(X, [-1, 1])
+            Y = tf.reshape(Y, [-1, 1])
+            Z = tf.reshape(Z, [-1, 1])
 
         total_loss = 0.0
 

@@ -8,14 +8,15 @@ def main():
     
     # Simulation parameters
     case_name = "FlowOverAirfoil"
-    epochs = 10000
+    epochs = 1000
     print_interval = 100
     autosave_interval = 1000
     
     # Mesh parameters
-    nx = 100
-    ny = 100
+    nx = 200
+    ny = 200
     n_boundary = 100
+    num_batches = 5
 
     trainedModel = False
     
@@ -34,8 +35,9 @@ def main():
         else:
             print("Starting training...")
             airfoil.train(epochs=epochs, 
-                        print_interval=print_interval,
-                        autosaveInterval=autosave_interval)
+                         num_batches=num_batches,  # Changed from batch_size
+                         print_interval=print_interval,
+                         autosaveInterval=autosave_interval)
         
         # Predict and visualize
         print("Predicting flow field...")
