@@ -125,7 +125,7 @@ class PINN:
         self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
         return loss
 
-    def train(self, loss_function, mesh, epochs: int = 1000, num_batches: int = ,
+    def train(self, loss_function, mesh, epochs: int = 1000, num_batches: int = 1,
               print_interval: int = 100, autosave_interval: int = 100,
               plot_loss: bool = False) -> None:
         """
