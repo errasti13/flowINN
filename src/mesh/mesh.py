@@ -328,10 +328,8 @@ class Mesh:
             np.ndarray: Valid points inside the domain
         """
         try:
-            # Get ordered polygon representation of the domain
             polygon = self._get_ordered_polygon()
             
-            # Check each point using ray-casting
             valid_mask = np.array([
                 self._is_point_inside((point[0], point[1]), polygon)
                 for point in points
@@ -339,21 +337,18 @@ class Mesh:
             
             valid_points = points[valid_mask]
 
-            # Check interior boundaries if they exist
             if self._interiorBoundaries:
                 for boundary_data in self._interiorBoundaries.values():
-                    interior_polygon = []
                     x_int = boundary_data['x']
                     y_int = boundary_data['y']
+                    interior_polygon = list(zip(x_int[:-1].astype(float), y_int[:-1].astype(float)))
                     
-                    for i in range(len(x_int) - 1):
-                        interior_polygon.append((float(x_int[i]), float(y_int[i])))
-                    
-                    # Remove points that are inside interior boundaries
-                    valid_points = np.array([
-                        point for point in valid_points
-                        if not self._is_point_inside((point[0], point[1]), interior_polygon)
+                    # Vectorized interior check
+                    interior_mask = np.array([
+                        not self._is_point_inside((x, y), interior_polygon)
+                        for x, y in valid_points[:, :2]
                     ])
+                    valid_points = valid_points[interior_mask]
 
             return valid_points
 
@@ -366,22 +361,22 @@ class Mesh:
         Reconstructs the ordered list of vertices from boundary segments.
         Returns a list of vertices (points) in order.
         """
-        # Create segments from boundaries
+
+        # Extract segments using NumPy
         segments = []
         for boundary_data in self.boundaries.values():
-            x_coords = boundary_data['x']
-            y_coords = boundary_data['y']
-            for i in range(len(x_coords) - 1):
-                pt1 = (float(x_coords[i]), float(y_coords[i]))
-                pt2 = (float(x_coords[i + 1]), float(y_coords[i + 1]))
-                segments.append((pt1, pt2))
-        
-        # Build adjacency dictionary
+            coords = np.column_stack((boundary_data["x"], boundary_data["y"]))
+            segments.extend(zip(coords[:-1], coords[1:]))
+
+        # Convert tuples to float tuples
+        segments = [((float(p1[0]), float(p1[1])), (float(p2[0]), float(p2[1]))) for p1, p2 in segments]
+
+        # Build adjacency dictionary efficiently
         adj = {}
-        for seg in segments:
-            p1, p2 = seg
+        for p1, p2 in segments:
             adj.setdefault(p1, set()).add(p2)
             adj.setdefault(p2, set()).add(p1)
+
         
         # Construct ordered polygon
         start = next(iter(adj))
