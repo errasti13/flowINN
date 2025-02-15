@@ -4,6 +4,8 @@ from src.mesh.meshio import MeshIO
 from src.mesh.visualizer import MeshVisualizer
 from src.mesh.sampler import Sampler 
 from src.mesh.checker import Checker
+from src.mesh.boundary_handler import BoundaryConditionHandler as bc
+
 class Mesh:
     """
     A class for generating and managing computational meshes.
@@ -246,14 +248,14 @@ class Mesh:
             print(f"Debug: Error during boundary concatenation: {str(e)}")
             raise
 
+        Checker.check_closed_curve(self)
+
         if sampling_method == 'random':
             Sampler._sampleRandomlyWithinBoundary(self, x_boundary, y_boundary, z_boundary, Nx, Ny, Nz)
         elif sampling_method == 'uniform':
             Sampler._sampleUniformlyWithinBoundary(self, x_boundary, y_boundary, z_boundary, Nx, Ny, Nz)
         else:
             raise ValueError(f"Unsupported sampling method: {sampling_method}")
-        
-        Checker.check_closed_curve(self)
 
 
     def setBoundary(self, boundary_name: str, xBc: np.ndarray, yBc: np.ndarray, interior: bool = False,
@@ -269,42 +271,7 @@ class Mesh:
             **boundary_conditions (Dict[str, np.ndarray]): Variable names and their values.
         """
         for var_name, values in boundary_conditions.items():
-            self.setBoundaryCondition(xBc, yBc, values, var_name, boundary_name, interior=interior)
-
-    def setBoundaryCondition(self, xCoord: np.ndarray, yCoord: np.ndarray, value: np.ndarray, varName: str,
-                             boundaryName: str, zCoord: Optional[np.ndarray] = None, interior: bool = False,
-                             bc_type: Optional[str] = None) -> None:
-        """
-        Sets boundary conditions for either exterior or interior boundaries.
-
-        Args:
-            xCoord (np.ndarray): x-coordinates of the boundary.
-            yCoord (np.ndarray): y-coordinates of the boundary.
-            value (np.ndarray): Value of the boundary condition.
-            varName (str): Name of the variable.
-            boundaryName (str): Name of the boundary.
-            zCoord (Optional[np.ndarray]): z-coordinates of the boundary (for 3D meshes).
-            interior (bool): Flag indicating if this is an interior boundary. Defaults to False.
-            bc_type (Optional[str]): Type of the boundary condition.
-        """
-        boundary_dict = self._interiorBoundaries if interior else self._boundaries
-
-        if boundaryName not in boundary_dict:
-            boundary_dict[boundaryName] = {}
-
-        boundary_dict[boundaryName]['x'] = np.asarray(xCoord, dtype=np.float32)
-        boundary_dict[boundaryName]['y'] = np.asarray(yCoord, dtype=np.float32)
-
-        if not self.is2D:
-            if zCoord is None:
-                raise ValueError(f"z coordinate required for 3D mesh in boundary {boundaryName}")
-            boundary_dict[boundaryName]['z'] = np.asarray(zCoord, dtype=np.float32)
-
-        if value is not None:
-            boundary_dict[boundaryName][varName] = np.asarray(value, dtype=np.float32)
-            boundary_dict[boundaryName][f'{varName}_type'] = bc_type
-
-        boundary_dict[boundaryName]['isInterior'] = interior
+            bc.setBoundaryCondition(self, xBc, yBc, values, var_name, boundary_name, interior=interior)
 
     def showMesh(self, figsize: Tuple[int, int] = (8, 6)) -> None:
         """
