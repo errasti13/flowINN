@@ -1,4 +1,4 @@
-from src.tests.FlowOverAirfoil import FlowOverAirfoil
+from flowinn.tests.FlowOverAirfoil import FlowOverAirfoil
 
 def main():
     # Domain setup
@@ -27,6 +27,7 @@ def main():
         # Generate mesh
         print("Generating mesh...")
         airfoil.generateMesh(Nx=nx, Ny=ny, NBoundary=n_boundary, sampling_method='random')
+        airfoil.mesh.showMesh()
         
         # Train the model
         if trainedModel:

@@ -1,10 +1,10 @@
 import numpy as np
 from typing import Dict, Optional, Tuple
-from src.mesh.meshio import MeshIO
-from src.mesh.visualizer import MeshVisualizer
-from src.mesh.sampler import Sampler 
-from src.mesh.checker import Checker
-from src.mesh.boundary_handler import BoundaryConditionHandler as bc
+from flowinn.mesh.meshio import MeshIO
+from flowinn.mesh.visualizer import MeshVisualizer
+from flowinn.mesh.sampler import Sampler 
+from flowinn.mesh.checker import Checker
+from flowinn.mesh.boundary_handler import BoundaryConditionHandler as bc
 
 class Mesh:
     """

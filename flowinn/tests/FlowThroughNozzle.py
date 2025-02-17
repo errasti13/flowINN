@@ -1,28 +1,27 @@
 import numpy as np
 import logging
-from typing import Tuple, Optional
-from src.mesh.mesh import Mesh
-from src.models.model import PINN
-from src.training.loss import NavierStokesLoss
-from src.plot.plot import Plot
-from src.physics.boundary_conditions import InletBC, OutletBC, WallBC 
+from typing import Tuple
+from flowinn.mesh.mesh import Mesh
+from flowinn.models.model import PINN
+from flowinn.training.loss import NavierStokesLoss
+from flowinn.plot.plot import Plot
+from flowinn.physics.boundary_conditions import InletBC, OutletBC, WallBC
 
-class FlowOverAirfoil:
-    def __init__(self, caseName: str, xRange: Tuple[float, float], yRange: Tuple[float, float], AoA: float = 0.0):
+class FlowThroughNozzle:
+    def __init__(self, caseName: str, xRange: Tuple[float, float], yRange: Tuple[float, float]):
         """
-        Initialize FlowOverAirfoil simulation.
-        
+        Initialize FlowThroughNozzle simulation.
+
         Args:
             caseName: Name of the simulation case
             xRange: Tuple of (min_x, max_x) domain bounds
             yRange: Tuple of (min_y, max_y) domain bounds
-            AoA: Angle of attack in degrees
         """
         if not isinstance(caseName, str):
             raise TypeError("caseName must be a string")
-        if not all(isinstance(x, (int, float)) for x in [*xRange, *yRange, AoA]):
-            raise TypeError("xRange, yRange and AoA must be numeric")
-            
+        if not all(isinstance(x, (int, float)) for x in [*xRange, *yRange]):
+            raise TypeError("xRange and yRange must be numeric")
+
         self.logger = logging.getLogger(__name__)
         self.is2D = True
         self.problemTag = caseName
@@ -35,45 +34,47 @@ class FlowOverAirfoil:
         self.xRange = xRange
         self.yRange = yRange
 
-        self.AoA = AoA
-        self.c   = 1.0  #Airfoil Chord
-        self.x0  = 0.0  #Airfoil leading edge x coordinate
-        self.y0  = 0.0  #Airfoil leading edge y coordinate
-
-        self.generate_airfoil_coords()
-
         # Initialize boundary condition objects
         self.inlet_bc = InletBC("inlet")
         self.outlet_bc = OutletBC("outlet")
         self.wall_bc = WallBC("wall")
 
         return
-    
-    def generate_airfoil_coords(self, N=100, thickness=0.12):
+
+    def generate_nozzle_geometry(self, N: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        Generate NACA 4-digit airfoil coordinates for both upper and lower surfaces.
-        The lower surface is just the negative of the upper surface.
+        Generate coordinates for a convergent-divergent nozzle using a combination
+        of quadratic functions for smooth transitions.
         """
-        # Generate x coordinates
-        x = np.linspace(self.x0, self.x0 + self.c, N)
-        x_normalized = x / self.c
+        x = np.linspace(self.xRange[0], self.xRange[1], N)
         
-        # Generate upper surface
-        y_upper = self.y0 + 5 * thickness * (0.2969 * np.sqrt(x_normalized) 
-                                - 0.1260 * x_normalized 
-                                - 0.3516 * x_normalized**2 
-                                + 0.2843 * x_normalized**3 
-                                - 0.1015 * x_normalized**4)
+        # Nozzle geometry parameters
+        inlet_width = 1.0    # Width at inlet
+        throat_width = 0.3   # Width at throat (narrowest point)
+        outlet_width = 1.2   # Width at outlet (slightly larger than inlet for supersonic expansion)
         
-        # Generate lower surface
-        y_lower = self.y0 - y_upper
+        # Position parameters
+        x_length = self.xRange[1] - self.xRange[0]
+        throat_position = self.xRange[0] + 0.4 * x_length  # Throat at 40% of length
         
-        # Combine coordinates in the correct order (counterclockwise)
-        self.xAirfoil = np.concatenate([x, np.flip(x)]).reshape(-1, 1)
-        self.yAirfoil = np.concatenate([y_upper, np.flip(y_lower)]).reshape(-1, 1)
+        # Generate width profile
+        width = np.zeros_like(x)
+        for i, xi in enumerate(x):
+            if xi <= throat_position:
+                # Convergent section (inlet to throat)
+                x_norm = (xi - self.xRange[0]) / (throat_position - self.xRange[0])
+                width[i] = inlet_width + (throat_width - inlet_width) * x_norm**2
+            else:
+                # Divergent section (throat to outlet)
+                x_norm = (xi - throat_position) / (self.xRange[1] - throat_position)
+                width[i] = throat_width + (outlet_width - throat_width) * x_norm**2
         
-        return
-    
+        # Generate top and bottom profiles
+        y_top = width
+        y_bottom = -width
+        
+        return x, y_top, y_bottom
+
     def generateMesh(self, Nx: int = 100, Ny: int = 100, NBoundary: int = 100, sampling_method: str = 'random'):
         try:
             if not all(isinstance(x, int) and x > 0 for x in [Nx, Ny, NBoundary]):
@@ -84,34 +85,23 @@ class FlowOverAirfoil:
             # Initialize boundaries first
             self._initialize_boundaries()
             
-            # Create and validate boundary points
-            x_top = np.linspace(self.xRange[0], self.xRange[1], NBoundary)
-            y_top = np.full_like(x_top, self.yRange[1])
+            # Generate nozzle geometry for boundaries
+            x_boundary, y_top, y_bottom = self.generate_nozzle_geometry(NBoundary)
             
-            x_bottom = np.linspace(self.xRange[0], self.xRange[1], NBoundary)
-            y_bottom = np.full_like(x_bottom, self.yRange[0])
+            # Create inlet/outlet points that match the nozzle height at those positions
+            inlet_height = y_top[0] - y_bottom[0]  # Height at inlet
+            outlet_height = y_top[-1] - y_bottom[-1]  # Height at outlet
             
             x_inlet = np.full(NBoundary, self.xRange[0])
-            y_inlet = np.linspace(self.yRange[0], self.yRange[1], NBoundary)
+            y_inlet = np.linspace(y_bottom[0], y_top[0], NBoundary)  # Match nozzle height at inlet
             
             x_outlet = np.full(NBoundary, self.xRange[1])
-            y_outlet = np.linspace(self.yRange[0], self.yRange[1], NBoundary)
+            y_outlet = np.linspace(y_bottom[-1], y_top[-1], NBoundary)  # Match nozzle height at outlet
 
-            # Ensure airfoil coordinates are properly shaped
-            x_airfoil = self.xAirfoil.flatten()
-            y_airfoil = self.yAirfoil.flatten()
-
-            # Validate coordinates
-            all_coords = [x_top, y_top, x_bottom, y_bottom, x_inlet, y_inlet, 
-                         x_outlet, y_outlet, x_airfoil, y_airfoil]
-            
-            if any(np.any(np.isnan(coord)) for coord in all_coords):
-                raise ValueError("NaN values detected in boundary coordinates")
-
-            # Update exterior boundaries
+            # Update exterior boundaries with nozzle geometry
             for name, coords in [
-                ('top', (x_top, y_top)),
-                ('bottom', (x_bottom, y_bottom)),
+                ('top', (x_boundary, y_top)),
+                ('bottom', (x_boundary, y_bottom)),
                 ('Inlet', (x_inlet, y_inlet)),
                 ('Outlet', (x_outlet, y_outlet))
             ]:
@@ -121,15 +111,6 @@ class FlowOverAirfoil:
                     'x': coords[0].astype(np.float32),
                     'y': coords[1].astype(np.float32)
                 })
-
-            # Update interior boundary (airfoil)
-            if 'Airfoil' not in self.mesh.interiorBoundaries:
-                raise KeyError("Airfoil boundary not initialized")
-            
-            self.mesh.interiorBoundaries['Airfoil'].update({
-                'x': x_airfoil.astype(np.float32),
-                'y': y_airfoil.astype(np.float32)
-            })
 
             # Validate boundary conditions before mesh generation
             self._validate_boundary_conditions()
@@ -147,19 +128,15 @@ class FlowOverAirfoil:
 
     def _initialize_boundaries(self):
         """Initialize boundaries with proper BC system."""
-        # Calculate velocity components
-        u_inf = float(np.cos(np.radians(self.AoA)))
-        v_inf = float(np.sin(np.radians(self.AoA)))
-        
         # Initialize exterior boundaries
         self.mesh.boundaries = {
             'Inlet': {
                 'x': None,
                 'y': None,
                 'conditions': {
-                    'u': {'value': u_inf},
-                    'v': {'value': v_inf},
-                    'p': {'gradient': 0.0, 'direction': 'x'}
+                    'u': {'value': 1.0},  # Example inlet velocity
+                    'v': None,
+                    'p': {'value': 1.2}
                 },
                 'bc_type': self.inlet_bc
             },
@@ -169,7 +146,7 @@ class FlowOverAirfoil:
                 'conditions': {
                     'u': None,
                     'v': None,
-                    'p': None
+                    'p': {'value': 1.0}  # Example outlet pressure
                 },
                 'bc_type': self.outlet_bc
             },
@@ -177,9 +154,9 @@ class FlowOverAirfoil:
                 'x': None,
                 'y': None,
                 'conditions': {
-                    'u': {'value': u_inf},
-                    'v': {'value': v_inf},
-                    'p': {'gradient': 0.0, 'direction': 'y'}
+                    'u': {'value': 0.0},  # No-slip condition
+                    'v': {'value': 0.0},  # No-slip condition
+                    'p': {'gradient': 0.0, 'direction': 'normal'}  # Zero pressure gradient normal to wall
                 },
                 'bc_type': self.wall_bc
             },
@@ -187,44 +164,21 @@ class FlowOverAirfoil:
                 'x': None,
                 'y': None,
                 'conditions': {
-                    'u': {'value': u_inf},
-                    'v': {'value': v_inf},
-                    'p': {'gradient': 0.0, 'direction': 'y'}
-                },
-                'bc_type': self.wall_bc
-            }
-        }
-        
-        # Initialize interior boundary (airfoil) separately
-        self.mesh.interiorBoundaries = {
-            'Airfoil': {
-                'x': None,
-                'y': None,
-                'conditions': {
                     'u': {'value': 0.0},  # No-slip condition
                     'v': {'value': 0.0},  # No-slip condition
                     'p': {'gradient': 0.0, 'direction': 'normal'}  # Zero pressure gradient normal to wall
                 },
-                'bc_type': self.wall_bc,
-                'isInterior': True  # Explicitly mark as interior boundary
+                'bc_type': self.wall_bc
             }
         }
 
     def _validate_boundary_conditions(self):
         """Validate boundary conditions before mesh generation."""
-        # Check exterior boundaries
         for name, boundary in self.mesh.boundaries.items():
             if any(key not in boundary for key in ['x', 'y', 'conditions', 'bc_type']):
                 raise ValueError(f"Missing required fields in boundary {name}")
             if boundary['x'] is None or boundary['y'] is None:
                 raise ValueError(f"Coordinates not set for boundary {name}")
-
-        # Check interior boundaries
-        for name, boundary in self.mesh.interiorBoundaries.items():
-            if any(key not in boundary for key in ['x', 'y', 'conditions', 'bc_type']):
-                raise ValueError(f"Missing required fields in interior boundary {name}")
-            if boundary['x'] is None or boundary['y'] is None:
-                raise ValueError(f"Coordinates not set for interior boundary {name}")
 
     def getLossFunction(self):
         self.loss = NavierStokesLoss(self.mesh, self.model)
@@ -263,7 +217,7 @@ class FlowOverAirfoil:
     def write_solution(self, filename=None):
         """Write the solution to a CSV format file."""
         if filename is None:
-            filename = f"{self.problemTag}_AoA_{self.AoA:.1f}.csv"
+            filename = f"{self.problemTag}.csv"
         elif not filename.endswith('.csv'):
             filename += '.csv'
         

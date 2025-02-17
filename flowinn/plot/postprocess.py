@@ -2,7 +2,7 @@ import numpy as np
 from typing import TYPE_CHECKING, Dict, Optional
 
 if TYPE_CHECKING:
-    from src.plot.plot import Plot
+    from flowinn.plot.plot import Plot
 
 
 class Postprocess:
@@ -21,7 +21,7 @@ class Postprocess:
         Args:
             plot_obj (Plot): The Plot object associated with this postprocessor.
         """
-        from src.plot.plot import Plot
+        from flowinn.plot.plot import Plot
         if not isinstance(plot_obj, Plot):
             raise TypeError("plot_obj must be a Plot instance")
 
@@ -46,7 +46,7 @@ class Postprocess:
         Raises:
             TypeError: If value is not a Plot instance.
         """
-        from src.plot.plot import Plot
+        from flowinn.plot.plot import Plot
         if not isinstance(value, Plot):
             raise TypeError("plot must be a Plot instance")
         self._plot = value

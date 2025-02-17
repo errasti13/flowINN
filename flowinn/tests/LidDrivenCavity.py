@@ -1,9 +1,9 @@
 import numpy as np
-from src.mesh.mesh import Mesh
-from src.models.model import PINN
-from src.training.loss import NavierStokesLoss
-from src.plot.plot import Plot
-from src.physics.boundary_conditions import MovingWallBC, WallBC
+from flowinn.mesh.mesh import Mesh
+from flowinn.models.model import PINN
+from flowinn.training.loss import NavierStokesLoss
+from flowinn.plot.plot import Plot
+from flowinn.physics.boundary_conditions import MovingWallBC, WallBC
 
 class LidDrivenCavity():
     

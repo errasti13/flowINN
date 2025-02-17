@@ -1,4 +1,4 @@
-from src.tests.LidDrivenCavity import LidDrivenCavity
+from flowinn.tests.LidDrivenCavity import LidDrivenCavity
 
 def main():
     # Domain setup

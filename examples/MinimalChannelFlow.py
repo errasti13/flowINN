@@ -1,5 +1,5 @@
 import numpy as np
-from src.tests.MinimalChannelFlow import MinimalChannelFlow
+from flowinn.tests.MinimalChannelFlow import MinimalChannelFlow
 
 def main():
     # Define simulation parameters

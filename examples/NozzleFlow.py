@@ -1,4 +1,4 @@
-from src.tests.FlowThroughNozzle import FlowThroughNozzle
+from flowinn.tests.FlowThroughNozzle import FlowThroughNozzle
 
 def main():
     # Domain setup
@@ -7,15 +7,15 @@ def main():
     
     # Simulation parameters
     case_name = "NozzleFlow"
-    epochs = 10000
+    epochs = 1000
     print_interval = 100
     autosave_interval = 1000
     
     # Mesh parameters
-    nx = 100
-    ny = 100
-    n_boundary = 100
-    num_batches = 1
+    nx = 200
+    ny = 200
+    n_boundary = 150
+    num_batches = 4
 
     trainedModel = False
     
@@ -25,7 +25,8 @@ def main():
 
         # Generate mesh
         print("Generating mesh...")
-        nozzle_flow.generateMesh(Nx=nx, Ny=ny, NBoundary=n_boundary, sampling_method='random')
+        nozzle_flow.generateMesh(Nx=nx, Ny=ny, NBoundary=n_boundary, sampling_method='uniform')
+        nozzle_flow.mesh.showMesh()
         
         # Train the model
         if trainedModel:

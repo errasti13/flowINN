@@ -5,7 +5,6 @@ setup(
     version="1.2.0",
     packages=find_packages(),
     install_requires=[
-        'tensorflow>=2.14.1',
         'numpy>=1.26.4',
         'matplotlib>=3.8.3',
         'scipy>=1.13.1',

@@ -41,7 +41,7 @@ The project is organized as follows:
 flowINN/
 ├── examples/                # Example scripts for different simulations
 ├── scripts/                 # Utility scripts for cleaning dependencies
-├── src/                     # Source code for the package
+├── flowinn/                 # Source code for the package
 │   ├── config.py            # Configuration settings
 │   ├── mesh/                # Mesh generation and handling
 │   ├── models/              # Neural network models
