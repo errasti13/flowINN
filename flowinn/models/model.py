@@ -50,7 +50,7 @@ class PINN:
             tf.keras.Sequential: A TensorFlow Keras Sequential model.
         """
         model = tf.keras.Sequential()
-        model.add(tf.keras.layers.InputLayer(input_shape=input_shape))
+        model.add(tf.keras.layers.InputLayer(shape=(input_shape)))
         for units in layers:
             model.add(tf.keras.layers.Dense(units, activation=activation))
         model.add(tf.keras.layers.Dense(output_shape))  # Output layer
