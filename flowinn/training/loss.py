@@ -1,6 +1,5 @@
 from flowinn.physics.steadyNS import NavierStokes2D, NavierStokes3D
 import tensorflow as tf
-from typing import Union, Optional
 
 class NavierStokesLoss:
     def __init__(self, mesh, model, weights = [0.7, 0.3]) -> None:  # Adjusted weights for physics vs boundary

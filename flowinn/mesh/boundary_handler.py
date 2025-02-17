@@ -1,5 +1,5 @@
 import numpy as np
-from typing import Dict, Optional
+from typing import Optional
 
 class BoundaryConditionHandler:
     @staticmethod

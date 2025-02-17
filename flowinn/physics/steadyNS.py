@@ -1,5 +1,5 @@
 import tensorflow as tf
-from typing import Tuple, Union, Optional
+from typing import Tuple
 from abc import ABC, abstractmethod
 
 

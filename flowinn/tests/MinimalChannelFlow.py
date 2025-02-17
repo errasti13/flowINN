@@ -1,6 +1,6 @@
 import numpy as np
 import logging
-from typing import Tuple, Optional
+from typing import Tuple
 from flowinn.mesh.mesh import Mesh
 from flowinn.models.model import PINN
 from flowinn.training.loss import NavierStokesLoss

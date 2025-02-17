@@ -1,7 +1,7 @@
 import numpy as np
 import tensorflow as tf
 from abc import ABC, abstractmethod
-from typing import Union, Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional
 
 class BoundaryCondition(ABC):
     """Base class for all boundary conditions."""

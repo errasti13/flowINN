@@ -1,6 +1,6 @@
 import tensorflow as tf
 import matplotlib.pyplot as plt
-from typing import List, Callable, Optional, Tuple
+from typing import List
 import os
 import numpy as np
 

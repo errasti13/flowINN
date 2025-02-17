@@ -1,8 +1,8 @@
 import matplotlib.pyplot as plt
 import numpy as np
 from flowinn.plot.postprocess import Postprocess
-from flowinn.mesh.mesh import Mesh  # Import Mesh class
-from typing import Optional, Tuple, Dict
+from flowinn.mesh.mesh import Mesh  
+from typing import Optional
 
 
 class Plot:
