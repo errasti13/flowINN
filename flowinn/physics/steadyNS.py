@@ -23,13 +23,9 @@ class NavierStokes(ABC):
             raise ValueError("Kinematic viscosity (nu) must be positive")
         self._nu = float(value)
 
-    def _compute_first_derivatives(self, variables: list, coordinates: list, tape) -> list:
-        """Compute first-order derivatives for all variables with respect to all coordinates."""
-        derivatives = []
-        for var in variables:
-            for coord in coordinates:
-                derivatives.append(tape.gradient(var, coord))
-        return derivatives
+    def _compute_first_derivatives(self, variables: list, coords: list, tape) -> list:
+        """Compute first-order derivatives for each variable with respect to each coordinate."""
+        return [tape.gradient(var, coord) for var in variables for coord in coords]
 
     def _compute_second_derivatives(self, first_derivatives: list, coordinates: list, tape) -> list:
         """Compute second-order derivatives."""
