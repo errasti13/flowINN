@@ -25,7 +25,7 @@ def main():
 
         # Generate mesh
         print("Generating mesh...")
-        nozzle_flow.generateMesh(Nx=nx, Ny=ny, NBoundary=n_boundary, sampling_method='uniform')
+        nozzle_flow.generateMesh(Nx=nx, Ny=ny, NBoundary=n_boundary, sampling_method='random')
         nozzle_flow.mesh.showMesh()
         
         # Train the model

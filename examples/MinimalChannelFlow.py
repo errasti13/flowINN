@@ -31,7 +31,7 @@ def main():
         print("Generating mesh...")
         channel.generateMesh(Nx=nx, Ny=ny, Nz=nz, 
                            NBoundary=n_boundary, 
-                           sampling_method='uniform')
+                           sampling_method='random')
         channel.mesh.showMesh()
         # Train the model
         if trainedModel:

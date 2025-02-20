@@ -21,41 +21,73 @@ class Sampler:
         Raises:
             ValueError: If boundary coordinates contain NaN values.
         """
+        if mesh.is2D:
+            Sampler._sampleRandom2D(mesh, x_boundary, y_boundary, Nx, Ny)
+        else:
+            Sampler._sampleRandom3D(mesh, x_boundary, y_boundary, z_boundary, Nx, Ny, Nz)
+
+
+    @staticmethod
+    def _sampleRandom2D(mesh: 'Mesh', x_boundary: np.ndarray, y_boundary: np.ndarray,
+                         Nx: int, Ny: int) -> None:
+        
         try:
             x_boundary = np.asarray(x_boundary, dtype=np.float32)
             y_boundary = np.asarray(y_boundary, dtype=np.float32)
-            if z_boundary is not None:
-                z_boundary = np.asarray(z_boundary, dtype=np.float32)
 
-            if np.any(np.isnan(x_boundary)) or np.any(np.isnan(y_boundary)) or \
-               (z_boundary is not None and np.any(np.isnan(z_boundary))):
+            if np.any(np.isnan(x_boundary)) or np.any(np.isnan(y_boundary)):
                 raise ValueError("Boundary coordinates contain NaN values")
 
-            Nt = Nx * Ny * (Nz if not mesh.is2D and Nz is not None else 1)
+            Nt = Nx * Ny
 
             samples: List[np.ndarray] = []
             while len(samples) < Nt:
                 x_rand = np.random.uniform(np.min(x_boundary), np.max(x_boundary), size=Nt)
                 y_rand = np.random.uniform(np.min(y_boundary), np.max(y_boundary), size=Nt)
 
-                if not mesh.is2D and z_boundary is not None:
-                    z_rand = np.random.uniform(np.min(z_boundary), np.max(z_boundary), size=Nt)
-                    points = np.column_stack((x_rand, y_rand, z_rand))
-                else:
-                    points = np.column_stack((x_rand, y_rand))
+                points = np.column_stack((x_rand, y_rand))
 
-
-                valid_points = Sampler._check_points_in_domain(mesh, points, x_boundary, y_boundary, z_boundary)
+                valid_points = Sampler._check_points_in_domain(mesh, points, x_boundary, y_boundary)
                 samples.extend(valid_points)
 
             samples = np.array(samples)[:Nt]
-            if not mesh.is2D:
-                mesh._x = samples[:, 0].reshape(Nx, Ny, Nz)
-                mesh._y = samples[:, 1].reshape(Nx, Ny, Nz)
-                mesh._z = samples[:, 2].reshape(Nx, Ny, Nz)
-            else:
-                mesh._x = samples[:, 0].reshape(Nx, Ny)
-                mesh._y = samples[:, 1].reshape(Nx, Ny)
+
+            mesh._x = samples[:, 0].reshape(Nx, Ny)
+            mesh._y = samples[:, 1].reshape(Nx, Ny)
+
+        except Exception as e:
+            print(f"Debug: Error during random sampling: {str(e)}")
+            raise
+        
+    @staticmethod
+    def _sampleRandom3D(mesh: 'Mesh', x_boundary: np.ndarray, y_boundary: np.ndarray,
+                                      z_boundary: np.ndarray, Nx: int, Ny: int,
+                                      Nz: int) -> None:
+        try:
+            x_boundary = np.asarray(x_boundary, dtype=np.float32)
+            y_boundary = np.asarray(y_boundary, dtype=np.float32)
+            z_boundary = np.asarray(z_boundary, dtype=np.float32)
+
+            if np.any(np.isnan(x_boundary)) or np.any(np.isnan(y_boundary)) or \
+                (np.any(np.isnan(z_boundary))):
+                raise ValueError("Boundary coordinates contain NaN values")
+
+            Nt = Nx * Ny * Nz
+
+            samples: List[np.ndarray] = []
+            while len(samples) < Nt:
+                x_rand = np.random.uniform(np.min(x_boundary), np.max(x_boundary), size=Nt)
+                y_rand = np.random.uniform(np.min(y_boundary), np.max(y_boundary), size=Nt)
+                z_rand = np.random.uniform(np.min(z_boundary), np.max(z_boundary), size=Nt)
+                points = np.column_stack((x_rand, y_rand, z_rand))
+
+                samples.extend(points)
+
+            samples = np.array(samples)[:Nt]
+
+            mesh._x = samples[:, 0].reshape(Nx, Ny, Nz)
+            mesh._y = samples[:, 1].reshape(Nx, Ny, Nz)
+            mesh._z = samples[:, 2].reshape(Nx, Ny, Nz)
 
         except Exception as e:
             print(f"Debug: Error during random sampling: {str(e)}")
@@ -104,8 +136,8 @@ class Sampler:
         
     @staticmethod
     def _sampleUniform3D(mesh: 'Mesh', x_boundary: np.ndarray, y_boundary: np.ndarray,
-                                      z_boundary: Optional[np.ndarray], Nx: int, Ny: int,
-                                      Nz: Optional[int]) -> None:
+                                      z_boundary: np.ndarray, Nx: int, Ny: int,
+                                      Nz: int) -> None:
         """
         Samples points uniformly within the defined boundary.
 
@@ -153,8 +185,7 @@ class Sampler:
         mesh._x, mesh._y, mesh._z = inside_points[:, 0].astype(np.float32), inside_points[:, 1].astype(np.float32), inside_points[:, 2].astype(np.float32)
 
     @staticmethod
-    def _check_points_in_domain(mesh: 'Mesh', points: np.ndarray, x_boundary: np.ndarray,
-                                y_boundary: np.ndarray, z_boundary: Optional[np.ndarray] = None) -> np.ndarray:
+    def _check_points_in_domain(mesh: 'Mesh', points: np.ndarray) -> np.ndarray:
         """
         Checks if points are inside the domain and outside interior boundaries.
         
