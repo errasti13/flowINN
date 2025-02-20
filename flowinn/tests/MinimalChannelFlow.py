@@ -51,13 +51,69 @@ class MinimalChannelFlow:
             if sampling_method not in ['random', 'uniform']:
                 raise ValueError("sampling_method must be 'random' or 'uniform'")
             
-            # Set boundaries before mesh generation
+            # Initialize boundaries first
             self._initialize_boundaries()
-            self._set_channel_boundaries(NBoundary)
             
-            # Debug print of boundary coordinates
-        
+            # Create and validate boundary points
+            x_top = np.linspace(self.xRange[0], self.xRange[1], NBoundary)
+            y_top = np.linspace(self.yRange[0], self.yRange[1], NBoundary)
+            z_top = np.full_like(x_top, self.zRange[1])
             
+            x_bottom = np.linspace(self.xRange[0], self.xRange[1], NBoundary)
+            y_bottom = np.linspace(self.yRange[0], self.yRange[1], NBoundary)
+            z_bottom = np.full_like(x_bottom, self.zRange[0])
+            
+            x_inlet = np.full(NBoundary, self.xRange[0])
+            y_inlet = np.linspace(self.yRange[0], self.yRange[1], NBoundary)
+            z_inlet = np.linspace(self.zRange[0], self.zRange[1], NBoundary)
+            
+            x_outlet = np.full(NBoundary, self.xRange[1])
+            y_outlet = np.linspace(self.yRange[0], self.yRange[1], NBoundary)
+            z_outlet = np.linspace(self.zRange[0], self.zRange[1], NBoundary)
+            
+            x_front = np.linspace(self.xRange[0], self.xRange[1], NBoundary)
+            y_front = np.full_like(x_front, self.yRange[0])
+            z_front = np.linspace(self.zRange[0], self.zRange[1], NBoundary)
+            
+            x_back = np.linspace(self.xRange[0], self.xRange[1], NBoundary)
+            y_back = np.full_like(x_back, self.yRange[1])
+            z_back = np.linspace(self.zRange[0], self.zRange[1], NBoundary)
+
+            # Validate coordinates
+            all_coords = [
+                (x_top, y_top, z_top),
+                (x_bottom, y_bottom, z_bottom),
+                (x_inlet, y_inlet, z_inlet),
+                (x_outlet, y_outlet, z_outlet),
+                (x_front, y_front, z_front),
+                (x_back, y_back, z_back)
+            ]
+            
+            if any(np.any(np.isnan(coord)) for coords in all_coords for coord in coords):
+                raise ValueError("NaN values detected in boundary coordinates")
+
+            # Update boundaries
+            boundaries_map = {
+                'Top': (x_top, y_top, z_top),
+                'Bottom': (x_bottom, y_bottom, z_bottom),
+                'Inlet': (x_inlet, y_inlet, z_inlet),
+                'Outlet': (x_outlet, y_outlet, z_outlet),
+                'Front': (x_front, y_front, z_front),
+                'Back': (x_back, y_back, z_back)
+            }
+
+            for name, coords in boundaries_map.items():
+                if name not in self.mesh.boundaries:
+                    raise KeyError(f"Boundary '{name}' not initialized")
+                self.mesh.boundaries[name].update({
+                    'x': coords[0].astype(np.float32),
+                    'y': coords[1].astype(np.float32),
+                    'z': coords[2].astype(np.float32)
+                })
+
+            # Validate boundary conditions before mesh generation
+            self._validate_boundary_conditions()
+
             # Generate the mesh
             self.mesh.generateMesh(
                 Nx=Nx,
@@ -135,6 +191,15 @@ class MinimalChannelFlow:
             }
         }
 
+    def _validate_boundary_conditions(self):
+        """Validate boundary conditions before mesh generation."""
+        # Check exterior boundaries
+        for name, boundary in self.mesh.boundaries.items():
+            if any(key not in boundary for key in ['x', 'y', 'z', 'conditions', 'bc_type']):
+                raise ValueError(f"Missing required fields in boundary {name}")
+            if boundary['x'] is None or boundary['y'] is None or boundary['z'] is None:
+                raise ValueError(f"Coordinates not set for boundary {name}")
+
     def _set_channel_boundaries(self, NBoundary: int):
         """Set boundary conditions for channel flow."""
         # Calculate number of points per side
@@ -211,24 +276,28 @@ class MinimalChannelFlow:
         
         # Set all boundaries
         for name, data in boundaries.items():
-            self.mesh.setBoundaryCondition(
-                data['x'],
-                data['y'],
-                None,
-                'coordinates',
-                name,
-                zCoord=data['z']
+            # First set the coordinates for the boundary
+            self.mesh.setBoundary(
+                boundary_name=name,
+                xBc=data['x'],
+                yBc=data['y'],
+                zBc=data['z']  # Always pass z coordinates for 3D mesh
             )
-            # Set boundary conditions if any
-            for var_name, value in data['conditions'].items():
-                self.mesh.setBoundaryCondition(
-                    data['x'],
-                    data['y'],
-                    value,
-                    var_name,
-                    name,
-                    zCoord=data['z']
-                )
+            
+            # Then set any boundary conditions
+            for var_name, value in data.get('conditions', {}).items():
+                if value is not None:
+                    value_array = np.asarray(value).astype(np.float32)
+                    if np.isscalar(value):
+                        value_array = np.full_like(data['x'], value_array)
+                    
+                    self.mesh.setBoundary(
+                        boundary_name=name,
+                        xBc=data['x'],
+                        yBc=data['y'],
+                        zBc=data['z'],
+                        **{var_name: value_array}
+                    )
 
     def getLossFunction(self):
         self.loss = NavierStokesLoss(self.mesh, self.model)

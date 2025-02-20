@@ -248,8 +248,6 @@ class Mesh:
             print(f"Debug: Error during boundary concatenation: {str(e)}")
             raise
 
-        Checker.check_closed_curve(self)
-
         if sampling_method == 'random':
             Sampler._sampleRandomlyWithinBoundary(self, x_boundary, y_boundary, z_boundary, Nx, Ny, Nz)
         elif sampling_method == 'uniform':

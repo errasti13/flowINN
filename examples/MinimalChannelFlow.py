@@ -32,7 +32,7 @@ def main():
         channel.generateMesh(Nx=nx, Ny=ny, Nz=nz, 
                            NBoundary=n_boundary, 
                            sampling_method='uniform')
-        
+        channel.mesh.showMesh()
         # Train the model
         if trainedModel:
             print("Loading pre-trained model...")

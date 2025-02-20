@@ -1,5 +1,6 @@
 import numpy as np
 from typing import Optional, List, Tuple
+from scipy.spatial import Delaunay
 
 class Sampler:
     @staticmethod
@@ -75,10 +76,17 @@ class Sampler:
             Ny (int): Number of points in the y-dimension.
             Nz (Optional[int]): Number of points in the z-dimension.
         """
+        if mesh.is2D:
+            Sampler._sampleUniform2D(mesh, x_boundary, y_boundary, Nx, Ny)
+        else:
+            Sampler._sampleUniform3D(mesh, x_boundary, y_boundary, z_boundary, Nx, Ny, Nz)
+
+    @staticmethod
+    def _sampleUniform2D(mesh: 'Mesh', x_boundary: np.ndarray, y_boundary: np.ndarray,
+                                    Nx: int, Ny: int) -> None:
+        
         x_min, x_max = np.min(x_boundary), np.max(x_boundary)
         y_min, y_max = np.min(y_boundary), np.max(y_boundary)
-        z_min, z_max = (np.min(z_boundary), np.max(z_boundary)) if z_boundary is not None else (None, None)
-
         # Create uniform grid
         x_grid, y_grid = np.meshgrid(
             np.linspace(x_min, x_max, Nx),
@@ -91,17 +99,58 @@ class Sampler:
         # Use point-in-polygon test to filter points
         valid_points = Sampler._check_points_in_domain(mesh, grid_points, x_boundary, y_boundary)
         
-        if mesh.is2D:
-            mesh._x, mesh._y = valid_points[:, 0].astype(np.float32), valid_points[:, 1].astype(np.float32)
-        else:
-            # For 3D, add z coordinates after filtering x,y points
-            z_points = np.linspace(z_min, z_max, Nz)
-            valid_points_3d = np.array([
-                [x, y, z] for x, y in valid_points for z in z_points
-            ])
-            mesh._x = valid_points_3d[:, 0].astype(np.float32)
-            mesh._y = valid_points_3d[:, 1].astype(np.float32)
-            mesh._z = valid_points_3d[:, 2].astype(np.float32)
+        mesh._x, mesh._y = valid_points[:, 0].astype(np.float32), valid_points[:, 1].astype(np.float32)
+    
+        
+    @staticmethod
+    def _sampleUniform3D(mesh: 'Mesh', x_boundary: np.ndarray, y_boundary: np.ndarray,
+                                      z_boundary: Optional[np.ndarray], Nx: int, Ny: int,
+                                      Nz: Optional[int]) -> None:
+        """
+        Samples points uniformly within the defined boundary.
+
+        Args:
+            x_boundary (np.ndarray): x-coordinates of the boundary.
+            y_boundary (np.ndarray): y-coordinates of the boundary.
+            z_boundary (Optional[np.ndarray]): z-coordinates of the boundary (for 3D meshes).
+            Nx (int): Number of points in the x-dimension.
+            Ny (int): Number of points in the y-dimension.
+            Nz (Optional[int]): Number of points in the z-dimension.
+        """
+        x_min, x_max = np.min(x_boundary), np.max(x_boundary)
+        y_min, y_max = np.min(y_boundary), np.max(y_boundary)
+        z_min, z_max = (np.min(z_boundary), np.max(z_boundary)) if z_boundary is not None else (None, None)
+
+        x_grid, y_grid, z_grid = np.meshgrid(
+            np.linspace(x_min, x_max, Nx),
+            np.linspace(y_min, y_max, Ny),
+            np.linspace(z_min, z_max, Nz) if z_boundary is not None else [0]
+        )
+        grid_points = np.column_stack((x_grid.flatten(), y_grid.flatten(), z_grid.flatten())) if not mesh.is2D else np.column_stack((x_grid.flatten(), y_grid.flatten()))
+
+        points = np.column_stack((x_boundary, y_boundary, z_boundary)) if not mesh.is2D else np.column_stack((x_boundary, y_boundary))
+        triangulation = Delaunay(points)
+
+        inside = triangulation.find_simplex(grid_points) >= 0
+        inside_points = grid_points[inside]
+
+        if mesh._interiorBoundaries:
+            for boundary_data in mesh._interiorBoundaries.values():
+                x_int = boundary_data['x'].flatten()
+                y_int = boundary_data['y'].flatten()
+                if not mesh.is2D:
+                    z_int = boundary_data['z'].flatten()
+                    interior_points = np.column_stack((x_int, y_int, z_int))
+                else:
+                    interior_points = np.column_stack((x_int, y_int))
+
+                interior_tri = Delaunay(interior_points)
+
+                inside_interior = interior_tri.find_simplex(inside_points) >= 0
+
+                inside_points = inside_points[~inside_interior]
+
+        mesh._x, mesh._y, mesh._z = inside_points[:, 0].astype(np.float32), inside_points[:, 1].astype(np.float32), inside_points[:, 2].astype(np.float32)
 
     @staticmethod
     def _check_points_in_domain(mesh: 'Mesh', points: np.ndarray, x_boundary: np.ndarray,
