@@ -13,7 +13,6 @@ def main():
     print_interval = 100
     autosave_interval = 10000
     
-
     # Mesh parameters
     nx = 50
     ny = 30
@@ -31,7 +30,7 @@ def main():
         print("Generating mesh...")
         channel.generateMesh(Nx=nx, Ny=ny, Nz=nz, 
                            NBoundary=n_boundary, 
-                           sampling_method='random')
+                           sampling_method='uniform')
         channel.mesh.showMesh()
         # Train the model
         if trainedModel:
