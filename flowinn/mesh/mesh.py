@@ -3,7 +3,6 @@ from typing import Dict, Optional, Tuple
 from flowinn.mesh.meshio import MeshIO
 from flowinn.mesh.visualizer import MeshVisualizer
 from flowinn.mesh.sampler import Sampler 
-from flowinn.mesh.checker import Checker
 from flowinn.mesh.boundary_handler import BoundaryConditionHandler as bc
 
 class Mesh:
