@@ -120,10 +120,16 @@ class Sampler:
         
         x_min, x_max = np.min(x_boundary), np.max(x_boundary)
         y_min, y_max = np.min(y_boundary), np.max(y_boundary)
+        
+        # Create a more dense grid to ensure we have enough points after filtering
+        density_factor = 2
+        dense_Nx = Nx * density_factor
+        dense_Ny = Ny * density_factor
+        
         # Create uniform grid
         x_grid, y_grid = np.meshgrid(
-            np.linspace(x_min, x_max, Nx),
-            np.linspace(y_min, y_max, Ny)
+            np.linspace(x_min, x_max, dense_Nx),
+            np.linspace(y_min, y_max, dense_Ny)
         )
         
         # Stack coordinates for testing
@@ -132,8 +138,26 @@ class Sampler:
         # Use point-in-polygon test to filter points
         valid_points = Sampler._check_points_in_domain(mesh, grid_points)
         
-        mesh._x = valid_points[:, 0].reshape(-1, Ny).astype(np.float32)
-        mesh._y = valid_points[:, 1].reshape(-1, Ny).astype(np.float32)
+        # If we have too few points, increase density and try again
+        while len(valid_points) < Nx * Ny:
+            density_factor *= 2
+            dense_Nx = Nx * density_factor
+            dense_Ny = Ny * density_factor
+            
+            x_grid, y_grid = np.meshgrid(
+                np.linspace(x_min, x_max, dense_Nx),
+                np.linspace(y_min, y_max, dense_Ny)
+            )
+            grid_points = np.column_stack((x_grid.flatten(), y_grid.flatten()))
+            valid_points = Sampler._check_points_in_domain(mesh, grid_points)
+        
+        # Select evenly spaced points from valid points
+        if len(valid_points) > Nx * Ny:
+            indices = np.linspace(0, len(valid_points)-1, Nx * Ny, dtype=int)
+            valid_points = valid_points[indices]
+        
+        mesh._x = valid_points[:, 0].reshape(Nx, Ny).astype(np.float32)
+        mesh._y = valid_points[:, 1].reshape(Nx, Ny).astype(np.float32)
     
         
     @staticmethod
