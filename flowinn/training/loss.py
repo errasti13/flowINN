@@ -155,6 +155,10 @@ class NavierStokesLoss:
 
             total_loss += self.boundaryWeight * interior_loss
 
+        if hasattr(self.mesh, 'periodicBoundaries'):
+            periodic_loss = self.compute_periodic_loss()
+            total_loss += self.boundaryWeight * periodic_loss
+
         return total_loss
 
     def compute_physics_loss(self, velocities, pressure, coords, tape):
@@ -251,6 +255,65 @@ class NavierStokesLoss:
                     loss += tf.reduce_mean(tf.square(grad - target_gradient))
                         
         return loss
+
+    def compute_periodic_loss(self):
+        """Compute loss for periodic boundary conditions."""
+        periodic_loss = 0.0
+
+        for boundary_name, boundary_data in self.mesh.periodicBoundaries.items():
+            try:
+                coupled_boundary = boundary_data['coupled_boundary']
+                coupled_data = self.mesh.boundaries.get(coupled_boundary)
+
+                if coupled_data is None:
+                    print(f"Warning: Coupled boundary {coupled_boundary} not found for periodic boundary {boundary_name}")
+                    continue
+
+                # Get coordinates and set up gradients
+                with tf.GradientTape(persistent=True) as tape:
+                    # Get coordinates for base boundary
+                    base_coords = [
+                        tf.convert_to_tensor(boundary_data[coord], dtype=tf.float32)
+                        for coord in ['x', 'y', 'z'] if coord in boundary_data
+                    ]
+                    base_coords = [tf.reshape(coord, [-1, 1]) for coord in base_coords]
+                    
+                    # Get coordinates for coupled boundary
+                    coupled_coords = [
+                        tf.convert_to_tensor(coupled_data[coord], dtype=tf.float32)
+                        for coord in ['x', 'y', 'z'] if coord in coupled_data
+                    ]
+                    coupled_coords = [tf.reshape(coord, [-1, 1]) for coord in coupled_coords]
+
+                    # Watch coordinates for gradient computation
+                    for coord in base_coords + coupled_coords:
+                        tape.watch(coord)
+
+                    # Get predictions for both boundaries
+                    base_input = tf.concat(base_coords, axis=1)
+                    coupled_input = tf.concat(coupled_coords, axis=1)
+                    
+                    base_pred = self.model.model(base_input)
+                    coupled_pred = self.model.model(coupled_input)
+
+                    # Match values
+                    value_loss = tf.reduce_mean(tf.square(base_pred - coupled_pred))
+                    periodic_loss += value_loss
+
+                    # Match gradients
+                    base_grads = [tape.gradient(base_pred, coord) for coord in base_coords]
+                    coupled_grads = [tape.gradient(coupled_pred, coord) for coord in coupled_coords]
+
+                    for base_grad, coupled_grad in zip(base_grads, coupled_grads):
+                        if base_grad is not None and coupled_grad is not None:
+                            gradient_loss = tf.reduce_mean(tf.square(base_grad - coupled_grad))
+                            periodic_loss += gradient_loss
+
+            except Exception as e:
+                print(f"Warning: Error processing periodic boundary {boundary_name}: {str(e)}")
+                continue
+
+        return periodic_loss
 
     def convert_and_reshape(self, tensor, dtype=tf.float32, shape=(-1, 1)):
         if tensor is not None:

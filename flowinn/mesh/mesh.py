@@ -27,6 +27,7 @@ class Mesh:
         self._solutions: Dict[str, np.ndarray] = {}
         self._boundaries: Dict[str, Dict[str, np.ndarray]] = {}
         self._interiorBoundaries: Dict[str, Dict[str, np.ndarray]] = {}
+        self._periodicBoundaries: Dict[str, Dict[str, np.ndarray]] = {}
         self._is2D: bool = is2D
         self.meshio: Optional[MeshIO] = None
 
@@ -170,6 +171,28 @@ class Mesh:
         self._interiorBoundaries = value
 
     @property
+    def periodicBoundaries(self) -> Dict[str, Dict[str, np.ndarray]]:
+        """
+        Returns the interior boundaries dictionary.
+        """
+        return self._periodicBoundaries
+
+    @periodicBoundaries.setter
+    def periodicBoundaries(self, value: Dict[str, Dict[str, np.ndarray]]) -> None:
+        """
+        Sets the periodic boundaries dictionary.
+
+        Args:
+            value (dict): A dictionary containing interior boundary data.
+
+        Raises:
+            TypeError: If value is not a dictionary.
+        """
+        if not isinstance(value, dict):
+            raise TypeError("interiorBoundaries must be a dictionary")
+        self._periodicBoundaries = value
+
+    @property
     def is2D(self) -> bool:
         """
         Returns the is2D flag.
@@ -258,7 +281,7 @@ class Mesh:
     def setBoundary(self, boundary_name: str, xBc: np.ndarray, yBc: np.ndarray, interior: bool = False,
                     **boundary_conditions: Dict[str, np.ndarray]) -> None:
         """
-        Sets multiple boundary conditions at once.
+        Sets multiple boundary conditions at once for non-periodic boundaries.
 
         Args:
             boundary_name (str): Name of the boundary.
@@ -269,6 +292,16 @@ class Mesh:
         """
         for var_name, values in boundary_conditions.items():
             bc.setBoundaryCondition(self, xBc, yBc, values, var_name, boundary_name, interior=interior)
+
+    def setPeriodicBoundary(self, boundary_name: str, coupled_boundary: str) -> None:
+        """
+        Sets a periodic boundary pair.
+
+        Args:
+            boundary_name (str): Name of the periodic boundary.
+            coupled_boundary (str): Name of the boundary to which this boundary is coupled.
+        """
+        bc.setPeriodicBoundary(self, boundary_name, coupled_boundary)
 
     def showMesh(self, figsize: Tuple[int, int] = (8, 6)) -> None:
         """

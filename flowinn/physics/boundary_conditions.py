@@ -152,3 +152,39 @@ class MovingWallBC(DirichletBC):
         # Override with provided values
         base_values.update(values)
         return super().apply(coords, base_values, tape)
+
+class PeriodicBC(BoundaryCondition):
+    """Periodic boundary condition."""
+    def apply(self, coords: List[tf.Tensor], values: Dict[str, Any], tape: tf.GradientTape) -> Dict[str, Dict[str, Any]]:
+        """
+        Apply periodic boundary conditions ensuring continuity between coupled boundaries.
+        
+        Args:
+            coords: List of coordinate tensors [x, y] or [x, y, z]
+            values: Dictionary containing boundary values and coupled boundary information
+            tape: GradientTape for automatic differentiation
+            
+        Returns:
+            Dictionary containing periodic boundary information
+        """
+        result = {}
+        n_dims = len(coords)
+
+        # Define base variables that should be periodic
+        variables = ['u', 'v', 'p']
+        if n_dims > 2:
+            variables.append('w')
+
+        for var_name in variables:
+            result[var_name] = {
+                'periodic': True,
+                'value_match': True,      # Match values across periodic boundary
+                'gradient_match': True    # Match gradients across periodic boundary
+            }
+
+        # Override with any provided values
+        for var_name, var_info in values.items():
+            if isinstance(var_info, dict):
+                result[var_name].update(var_info)
+
+        return result

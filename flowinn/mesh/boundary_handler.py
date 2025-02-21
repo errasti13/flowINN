@@ -1,5 +1,5 @@
 import numpy as np
-from typing import Optional
+from typing import Optional, Dict
 
 class BoundaryConditionHandler:
     @staticmethod
@@ -37,3 +37,33 @@ class BoundaryConditionHandler:
             boundary_dict[boundaryName][f'{varName}_type'] = bc_type
 
         boundary_dict[boundaryName]['isInterior'] = interior
+
+    @staticmethod
+    def setPeriodicBoundary(mesh: 'Mesh', boundary_name: str, coupled_boundary: str) -> None:
+        """
+        Sets a periodic boundary pair.
+
+        Args:
+            mesh (Mesh): The mesh object.
+            boundary_name (str): Name of the periodic boundary.
+            coupled_boundary (str): Name of the boundary to which this boundary is coupled.
+        """
+        # Check if boundaries exist
+        if boundary_name not in mesh._boundaries:
+            raise ValueError(f"Boundary {boundary_name} not found in boundaries")
+        if coupled_boundary not in mesh._boundaries:
+            raise ValueError(f"Coupled boundary {coupled_boundary} not found in boundaries")
+
+        # Create or get the periodic boundary dictionary
+        if boundary_name not in mesh._periodicBoundaries:
+            mesh._periodicBoundaries[boundary_name] = {}
+
+        # Copy coordinates from the boundary
+        boundary_data = mesh._boundaries[boundary_name]
+        mesh._periodicBoundaries[boundary_name].update({
+            'x': boundary_data['x'],
+            'y': boundary_data['y'],
+            'z': boundary_data['z'],
+            'coupled_boundary': coupled_boundary
+        })
+
