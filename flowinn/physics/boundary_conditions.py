@@ -1,7 +1,7 @@
 import numpy as np
 import tensorflow as tf
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Union
 
 class BoundaryCondition(ABC):
     """Base class for all boundary conditions."""
@@ -9,119 +9,146 @@ class BoundaryCondition(ABC):
         self.name = name
 
     @abstractmethod
-    def apply(self, x: tf.Tensor, y: tf.Tensor, values: Dict[str, Any], tape: Optional[tf.GradientTape] = None) -> Dict[str, tf.Tensor]:
-        """Apply the boundary condition."""
+    def apply(self, coords: List[tf.Tensor], values: Dict[str, Any], tape: tf.GradientTape) -> Dict[str, Dict[str, Any]]:
+        """
+        Apply the boundary condition.
+        
+        Args:
+            coords: List of coordinate tensors [x, y] or [x, y, z]
+            values: Dictionary of boundary values and conditions
+            tape: GradientTape for automatic differentiation
+            
+        Returns:
+            Dictionary of variable names to their boundary conditions
+        """
         pass
 
 class GradientBC(BoundaryCondition):
     """Boundary condition for gradients of variables."""
-    def apply(self, x: tf.Tensor, y: tf.Tensor, values: Dict[str, Any], tape: Optional[tf.GradientTape] = None) -> Dict[str, tf.Tensor]:
-        if tape is None:
-            raise ValueError("GradientTape is required for gradient boundary conditions")
-        
+    def apply(self, coords: List[tf.Tensor], values: Dict[str, Any], tape: tf.GradientTape) -> Dict[str, Dict[str, Any]]:
         result = {}
+        n_dims = len(coords)  # Get number of dimensions
+        
         for var_name, grad_info in values.items():
             if grad_info is None:
                 result[var_name] = None
                 continue
 
-            direction = grad_info.get('direction', 'normal')
-            value = grad_info.get('value', 0.0)
-            
-            if direction == 'normal':
-                # Calculate normal direction based on boundary geometry
-                nx = grad_info.get('nx', 0.0)
-                ny = grad_info.get('ny', 0.0)
-                result[var_name] = {'gradient': value, 'direction': (nx, ny)}
-            elif direction in ['x', 'y']:
-                result[var_name] = {'gradient': value, 'direction': direction}
+            if isinstance(grad_info, dict):
+                direction = grad_info.get('direction', 'normal')
+                value = grad_info.get('value', 0.0)
+                
+                if direction == 'normal':
+                    # Get normal direction components for actual dimensions
+                    normal_components = [
+                        grad_info.get(f'n{dim}', 0.0)
+                        for dim in ['x', 'y', 'z'][:n_dims]
+                    ]
+                    direction = tuple(normal_components)
+                
+                result[var_name] = {
+                    'gradient': tf.cast(value, tf.float32),
+                    'direction': direction
+                }
             
         return result
 
 class DirichletBC(BoundaryCondition):
-    """Dirichlet boundary condition with optional gradient constraints."""
-    def apply(self, x: tf.Tensor, y: tf.Tensor, values: Dict[str, Any], tape: Optional[tf.GradientTape] = None) -> Dict[str, tf.Tensor]:
+    """Dirichlet boundary condition."""
+    def apply(self, coords: List[tf.Tensor], values: Dict[str, Any], tape: tf.GradientTape) -> Dict[str, Dict[str, Any]]:
         result = {}
-        for var_name, var_info in values.items():
-            if isinstance(var_info, dict):
-                if 'value' in var_info:
-                    result[var_name] = {'value': var_info['value']}
-                if 'gradient' in var_info and tape is not None:
-                    result[f'{var_name}_gradient'] = {'gradient': var_info['gradient'], 'direction': var_info.get('direction', 'normal')}
-            else:
-                result[var_name] = {'value': var_info} if var_info is not None else None
-        return result
-
-# Update existing boundary condition classes
-class WallBC(DirichletBC):
-    """No-slip wall boundary condition with optional gradient constraints."""
-    def apply(self, x: tf.Tensor, y: tf.Tensor, values: Dict[str, Any], tape: Optional[tf.GradientTape] = None) -> Dict[str, tf.Tensor]:
-        base_values = {
-            'u': {'value': 0.0},
-            'v': {'value': 0.0},
-            'p': values.get('p', None)  # Pressure can have either value or gradient condition
-        }
-        # Merge with provided values
-        base_values.update(values)
-        return super().apply(x, y, base_values, tape)
-
-class InletBC(DirichletBC):
-    """Inlet boundary condition with optional gradient constraints."""
-    def apply(self, x: tf.Tensor, y: tf.Tensor, values: Dict[str, Any], tape: Optional[tf.GradientTape] = None) -> Dict[str, tf.Tensor]:
-        base_values = {
-            'u': values.get('u', {'value': 1.0}),
-            'v': values.get('v', {'value': 0.0}),
-            'p': values.get('p', None)
-        }
-        return super().apply(x, y, base_values, tape)
-
-class OutletBC(GradientBC):
-    """Outlet boundary condition with gradient specifications."""
-    def apply(self, x: tf.Tensor, y: tf.Tensor, values: Dict[str, Any], tape: Optional[tf.GradientTape] = None) -> Dict[str, tf.Tensor]:
-        result = {}
+        n_dims = len(coords)
         
-        # Small coefficient to treat gradients as values
-        grad_coeff = 1e-6
-        
-        # Process each variable separately
         for var_name, var_info in values.items():
             if var_info is None:
+                result[var_name] = None
                 continue
-            
-            if var_name in ['u', 'v']:
-                # Apply zero gradient in x-direction
-                gradient_value = var_info.get('gradient', 0.0)
+
+            # Skip 'w' component in 2D
+            if var_name == 'w' and n_dims == 2:
+                continue
+
+            if isinstance(var_info, dict):
+                if 'value' in var_info:
+                    result[var_name] = {'value': tf.cast(var_info['value'], tf.float32)}
+                if 'gradient' in var_info:
+                    direction = var_info.get('direction', 'normal')
+                    if direction == 'normal':
+                        normal_components = [
+                            var_info.get(f'n{dim}', 0.0)
+                            for dim in ['x', 'y', 'z'][:n_dims]
+                        ]
+                        direction = tuple(normal_components)
+                    result[var_name] = {
+                        'gradient': tf.cast(var_info['gradient'], tf.float32),
+                        'direction': direction
+                    }
+            else:
+                result[var_name] = {'value': tf.cast(var_info, tf.float32)}
                 
-                # Convert to tensor and ensure correct shape
-                if not isinstance(gradient_value, tf.Tensor):
-                    gradient_value = tf.convert_to_tensor(gradient_value, dtype=tf.float32)
-                if gradient_value.shape != x.shape:
-                    gradient_value = tf.zeros_like(x, dtype=tf.float32)
-                
-                # Treat gradient as a small value
-                value = gradient_value * grad_coeff
-                result[var_name] = {'value': value}
-            
-            elif var_name == 'p':
-                # Use provided value or default to zero
-                value = var_info.get('value', 0.0)
-                
-                # Convert to tensor and ensure correct shape
-                if not isinstance(value, tf.Tensor):
-                    value = tf.convert_to_tensor(value, dtype=tf.float32)
-                if value.shape != x.shape:
-                    value = tf.zeros_like(x, dtype=tf.float32)
-                
-                result[var_name] = {'value': value}
-        
         return result
 
-class MovingWallBC(DirichletBC):
-    """Moving wall boundary condition with optional gradient constraints."""
-    def apply(self, x: tf.Tensor, y: tf.Tensor, values: Dict[str, Any], tape: Optional[tf.GradientTape] = None) -> Dict[str, tf.Tensor]:
+class WallBC(DirichletBC):
+    """No-slip wall boundary condition."""
+    def apply(self, coords: List[tf.Tensor], values: Dict[str, Any], tape: tf.GradientTape) -> Dict[str, Dict[str, Any]]:
         base_values = {
-            'u': values.get('u', {'value': 1.0}),
-            'v': {'value': 0.0},
-            'p': values.get('p', None)
+            'u': {'value': 0.0},
+            'v': {'value': 0.0}
         }
-        return super().apply(x, y, base_values, tape)
+        if len(coords) > 2:  # 3D case
+            base_values['w'] = {'value': 0.0}
+            
+        if 'p' in values:
+            base_values['p'] = values['p']
+            
+        # Override with any provided values
+        base_values.update(values)
+        return super().apply(coords, base_values, tape)
+
+class InletBC(DirichletBC):
+    """Inlet boundary condition."""
+    def apply(self, coords: List[tf.Tensor], values: Dict[str, Any], tape: tf.GradientTape) -> Dict[str, Dict[str, Any]]:
+        base_values = {
+            'u': {'value': 1.0},
+            'v': {'value': 0.0}
+        }
+        if len(coords) > 2:  # 3D case
+            base_values['w'] = {'value': 0.0}
+            
+        # Override with provided values
+        base_values.update(values)
+        return super().apply(coords, base_values, tape)
+
+class OutletBC(GradientBC):
+    """Outlet boundary condition."""
+    def apply(self, coords: List[tf.Tensor], values: Dict[str, Any], tape: tf.GradientTape) -> Dict[str, Dict[str, Any]]:
+        base_values = {
+            'u': {'gradient': 0.0, 'direction': 'x'},
+            'v': {'gradient': 0.0, 'direction': 'x'}
+        }
+        if len(coords) > 2:  # 3D case
+            base_values['w'] = {'gradient': 0.0, 'direction': 'x'}
+            
+        if 'p' in values:
+            base_values['p'] = {'value': 0.0}  # Default pressure value at outlet
+            
+        # Override with provided values
+        base_values.update(values)
+        return super().apply(coords, base_values, tape)
+
+class MovingWallBC(DirichletBC):
+    """Moving wall boundary condition."""
+    def apply(self, coords: List[tf.Tensor], values: Dict[str, Any], tape: tf.GradientTape) -> Dict[str, Dict[str, Any]]:
+        base_values = {
+            'u': {'value': 1.0},
+            'v': {'value': 0.0}
+        }
+        if len(coords) > 2:  # 3D case
+            base_values['w'] = {'value': 0.0}
+            
+        if 'p' in values:
+            base_values['p'] = values['p']
+            
+        # Override with provided values
+        base_values.update(values)
+        return super().apply(coords, base_values, tape)
