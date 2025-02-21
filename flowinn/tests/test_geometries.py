@@ -32,9 +32,9 @@ def test_lid_driven_cavity():
             xRange=(0.0, 1.0),
             yRange=(0.0, 1.0)
         )
-        case.generateMesh(Nx=20, Ny=20, NBoundary=50, sampling_method='uniform')
+        case.generateMesh(Nx=100, Ny=100, NBoundary=50, sampling_method='uniform')
         case.mesh.showMesh()
-        case.generateMesh(Nx=20, Ny=20, NBoundary=50, sampling_method='random') 
+        case.generateMesh(Nx=100, Ny=100, NBoundary=50, sampling_method='random') 
         case.mesh.showMesh()
         case.getLossFunction()
         case.train(epochs=10, print_interval=5, autosaveInterval=10, num_batches=2)
@@ -50,9 +50,9 @@ def test_flow_through_nozzle():
             xRange=(0.0, 3.0),
             yRange=(-1.0, 1.0)
         )
-        case.generateMesh(Nx=20, Ny=20, NBoundary=50, sampling_method='uniform')
+        case.generateMesh(Nx=100, Ny=100, NBoundary=50, sampling_method='uniform')
         case.mesh.showMesh()
-        case.generateMesh(Nx=20, Ny=20, NBoundary=50, sampling_method='random')
+        case.generateMesh(Nx=100, Ny=100, NBoundary=50, sampling_method='random')
         case.mesh.showMesh()
         case.getLossFunction()
         case.train(epochs=10, print_interval=5, autosaveInterval=10, num_batches=2)
@@ -69,9 +69,9 @@ def test_flow_over_airfoil():
             yRange=(-2.0, 2.0),
             AoA=5.0
         )
-        case.generateMesh(Nx=20, Ny=20, NBoundary=50, sampling_method='uniform')
+        case.generateMesh(Nx=100, Ny=100, NBoundary=50, sampling_method='uniform')
         case.mesh.showMesh()
-        case.generateMesh(Nx=20, Ny=20, NBoundary=50, sampling_method='random')
+        case.generateMesh(Nx=100, Ny=100, NBoundary=50, sampling_method='random')
         case.mesh.showMesh()
         case.getLossFunction()
         case.train(epochs=10, print_interval=5, autosaveInterval=10, num_batches=2)
