@@ -1,7 +1,10 @@
+# fl0wINN
 
-# fl0wINN: Multi-Scale Turbulent Flow Investigation using Neural Networks
+fl0wINN: Multi-Scale Turbulent Flow Investigation using Neural Networks
 
-fl0wINN is a Python package designed for investigating multi-scale turbulent flows using physics-informed neural networks (PINNs). This project aims to provide a flexible and extensible framework for simulating various fluid dynamics problems, including channel flow, lid-driven cavity, and flow over an airfoil.
+## Description
+
+fl0wINN is a Python package for investigating multi-scale turbulent flow using neural networks. It leverages Physics-Informed Neural Networks (PINNs) to solve complex fluid dynamics problems.
 
 ## Table of Contents
 - [Installation](#installation)
@@ -13,15 +16,21 @@ fl0wINN is a Python package designed for investigating multi-scale turbulent flo
 
 ## Installation
 
-To install the required dependencies, run:
+You can install fl0wINN using pip:
 
 ```bash
-git clone https://github.com/errasti13/flowINN.git
-cd flowINN
-pip install .
+pip install flowinn
 ```
 
 ## Usage
+
+```python
+from flowinn import PINN
+
+# Example usage
+pinn = PINN()
+# ... your code ...
+```
 
 ### Running Examples
 
