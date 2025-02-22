@@ -18,9 +18,6 @@ class MeshVisualizer:
         if mesh._x is None or mesh._y is None:
             raise ValueError("Mesh has not been generated yet")
 
-        x_min, x_max = np.min(mesh._x), np.max(mesh._x)
-        y_min, y_max = np.min(mesh._y), np.max(mesh._y)
-
         x_min, x_max = np.min(mesh.x), np.max(mesh.x)
         y_min, y_max = np.min(mesh.y), np.max(mesh.y)
 
@@ -47,16 +44,38 @@ class MeshVisualizer:
             scatter = ax.scatter(mesh.x, mesh.y, mesh.z,
                             c='black', s=1, alpha=0.5)
 
+            # Plot regular boundaries
             for boundary_data in mesh.boundaries.values():
                 x_boundary = boundary_data['x']
                 y_boundary = boundary_data['y']
                 z_boundary = boundary_data['z']
                 ax.plot3D(x_boundary, y_boundary, z_boundary,
-                        'b-', linewidth=1, alpha=0.5)
+                        'b-', linewidth=2, alpha=0.5, label='Boundary')
+
+            # Plot interior boundaries
+            for boundary_data in mesh.interiorBoundaries.values():
+                x_boundary = boundary_data['x']
+                y_boundary = boundary_data['y']
+                z_boundary = boundary_data['z']
+                ax.plot3D(x_boundary, y_boundary, z_boundary,
+                        'r--', linewidth=2, alpha=0.5, label='Interior')
+
+            # Plot periodic boundaries
+            for boundary_data in mesh.periodicBoundaries.values():
+                x_boundary = boundary_data['x']
+                y_boundary = boundary_data['y']
+                z_boundary = boundary_data['z']
+                ax.plot3D(x_boundary, y_boundary, z_boundary,
+                        'g:', linewidth=2, alpha=0.5, label='Periodic')
 
             ax.set_xlabel(f'X')
             ax.set_ylabel(f'Y')
             ax.set_zlabel(f'Z')
+
+            # Add legend with unique entries
+            handles, labels = ax.get_legend_handles_labels()
+            by_label = dict(zip(labels, handles))
+            ax.legend(by_label.values(), by_label.keys())
 
             ax.set_box_aspect([x_range/max_range,
                             y_range/max_range,
@@ -68,13 +87,29 @@ class MeshVisualizer:
 
             plt.scatter(mesh.x, mesh.y, c='black', s=1, alpha=0.5)
 
+            # Plot regular boundaries
             for boundary_data in mesh.boundaries.values():
                 plt.plot(boundary_data['x'], boundary_data['y'],
-                        'b-', linewidth=1, alpha=0.5)
+                        'b-', linewidth=2, alpha=0.5, label='Boundary')
+
+            # Plot interior boundaries
+            for boundary_data in mesh.interiorBoundaries.values():
+                plt.plot(boundary_data['x'], boundary_data['y'],
+                        'r--', linewidth=2, alpha=0.5, label='Interior')
+
+            # Plot periodic boundaries
+            for boundary_data in mesh.periodicBoundaries.values():
+                plt.plot(boundary_data['x'], boundary_data['y'],
+                        'g:', linewidth=2, alpha=0.5, label='Periodic')
 
             plt.xlabel(f'X ({x_max-x_min:.1f})')
             plt.ylabel(f'Y ({y_max-y_min:.1f})')
             plt.axis('equal')
+
+            # Add legend with unique entries
+            handles, labels = plt.gca().get_legend_handles_labels()
+            by_label = dict(zip(labels, handles))
+            plt.legend(by_label.values(), by_label.keys())
 
         plt.title(f'Mesh Visualization\n{domain_size}')
         plt.tight_layout()
