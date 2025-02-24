@@ -133,18 +133,8 @@ class MeshIO:
             raise TypeError("is2D must be a boolean")
         self._mesh.is2D = value
 
-    def write_tecplot(self, filename: str, variables: Optional[List[str]] = None) -> None:
-        """
-        Writes the solution to a Tecplot file.
-
-        Args:
-            filename (str): The name of the Tecplot file to write.
-            variables (Optional[List[str]]): Optional list of variable names to write.
-                                             If None, all variables in solutions will be used.
-
-        Raises:
-            IOError: If writing to the file fails.
-        """
+    def write_tecplot(self, filename: str) -> None:
+        """Writes the solution to a Tecplot file."""
         try:
             x = self.x.flatten()
             y = self.y.flatten()
@@ -160,13 +150,27 @@ class MeshIO:
             for var_name, var_data in self.solutions.items():
                 data_dict[var_name] = var_data.flatten()
 
-            if variables:  # If specific variables are requested, filter data_dict
-                filtered_dict = {k: data_dict[k] for k in variables if k in data_dict}
-                if filtered_dict:
-                    data_dict = filtered_dict
-                else:
-                    raise ValueError("None of the specified variables found in the solution data")
+            # Define variables to write
+            basic_vars = ['x', 'y', 'z'] if not self.is2D else ['x', 'y']
+            flow_vars = []
 
+            # Add standard flow variables
+            if 'u' in self.solutions or 'U' in self.solutions:
+                flow_vars.extend(['u', 'v', 'p'])
+
+            # Add RANS variables if present
+            if 'uu' in self.solutions:
+                flow_vars.extend(['uu', 'vv', 'uv'])
+
+            variables = basic_vars + flow_vars
+
+            # Write header
+            with open(filename, 'w') as f:
+                var_list = [f'"{var}"' for var in variables]
+                header = ', '.join(var_list)
+                f.write(f'VARIABLES = {header}\n')
+
+            # Write data
             dtype = [(name, 'float64') for name in data_dict.keys()]
             structured_data = np.zeros(len(x), dtype=dtype)
             for name in data_dict.keys():
