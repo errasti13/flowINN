@@ -1,16 +1,24 @@
 from flowinn.physics.steadyNS import NavierStokes2D, NavierStokes3D
+from flowinn.physics.RANS2D import RANS2D
 import tensorflow as tf
 
 class NavierStokesLoss:
-    def __init__(self, mesh, model, weights = [0.7, 0.3]) -> None:  # Adjusted weights for physics vs boundary
+    def __init__(self, mesh, model, physics_model='NS2D', weights=[0.7, 0.3]) -> None:
         self._mesh = mesh
         self._model = model
-        self._physics_loss = NavierStokes2D() if mesh.is2D else NavierStokes3D()
-        self._loss = None
         self._nu: float = 0.01
+        
+        # Initialize physics model based on type
+        if physics_model == 'NS2D':
+            self._physics_loss = NavierStokes2D()
+        elif physics_model == 'NS3D':
+            self._physics_loss = NavierStokes3D()
+        elif physics_model == 'RANS2D':
+            self._physics_loss = RANS2D(nu=self._nu)
+        else:
+            raise ValueError(f"Unknown physics model: {physics_model}")
 
-        # Update weights to include interior boundary weight
-        self.physicsWeight  = weights[0]
+        self.physicsWeight = weights[0]
         self.boundaryWeight = weights[1]
 
     @property
@@ -37,8 +45,8 @@ class NavierStokesLoss:
 
     @physics_loss.setter
     def physics_loss(self, value):
-        if not isinstance(value, (NavierStokes2D, NavierStokes3D)):
-            raise TypeError("physics_loss must be NavierStokes2D or NavierStokes3D")
+        if not isinstance(value, (NavierStokes2D, NavierStokes3D, RANS2D)):
+            raise TypeError("physics_loss must be NavierStokes2D, NavierStokes3D, or RANS2D")
         self._physics_loss = value
 
     @property
@@ -82,11 +90,7 @@ class NavierStokesLoss:
             input_tensor = tf.concat(coords, axis=1)
             predictions = self.model.model(input_tensor)
             
-            # Extract velocity components and pressure
-            velocities = predictions[:, :-1]  # All but last column
-            pressure = predictions[:, -1]     # Last column
-
-            physics_loss = self.compute_physics_loss(velocities, pressure, coords, tape)
+            physics_loss = self.compute_physics_loss(predictions, coords, tape)
             total_loss += self.physicsWeight * physics_loss
 
         # Compute boundary losses
@@ -161,25 +165,33 @@ class NavierStokesLoss:
 
         return total_loss
 
-    def compute_physics_loss(self, velocities, pressure, coords, tape):
-        """Compute physics-based loss terms for Navier-Stokes equations.
-        
-        Args:
-            velocities: Tensor of velocity components (u,v) or (u,v,w)
-            pressure: Pressure tensor
-            coords: List of coordinate tensors [X,Y] or [X,Y,Z]
-            tape: GradientTape instance
+    def compute_physics_loss(self, predictions, coords, tape):
+        """Compute physics-based loss terms for flow equations."""
+        # Split predictions based on physics model type
+        if isinstance(self._physics_loss, RANS2D):
+            # For RANS2D, expect [U, V, P, uu, vv, uv]
+            U = predictions[:, 0]
+            V = predictions[:, 1]
+            P = predictions[:, 2]
+            uu = predictions[:, 3]  # Reynolds stress component <u'u'>
+            vv = predictions[:, 4]  # Reynolds stress component <v'v'>
+            uv = predictions[:, 5]  # Reynolds stress component <u'v'>
             
-        Returns:
-            float: Combined physics loss from continuity and momentum equations
-        """
-        # Get residuals from physics model
-        residuals = self._physics_loss.get_residuals(velocities, pressure, coords, tape)
+            # Get residuals from RANS2D model
+            residuals = self._physics_loss.get_residuals(
+                U, V, P, uu, vv, uv, coords[0], coords[1], tape
+            )
+        else:
+            # For standard NS, use original splitting [u, v, p] or [u, v, w, p]
+            velocities = predictions[:, :-1]
+            pressure = predictions[:, -1]
+            residuals = self._physics_loss.get_residuals(
+                velocities, pressure, coords, tape
+            )
         
-        # Compute loss for each residual separately and then combine
+        # Compute loss for each residual
         loss = 0.0
         for residual in residuals:
-            # Ensure the residual is properly shaped
             residual = tf.reshape(residual, [-1])
             loss += tf.reduce_mean(tf.square(residual))
             
