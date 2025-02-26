@@ -8,15 +8,15 @@ def main():
     
     # Simulation parameters
     case_name = "FlowOverAirfoil"
-    epochs = 5000
+    epochs = 1000
     print_interval = 100
     autosave_interval = 1000
     
     # Mesh parameters
-    nx = 200
-    ny = 200
+    nx = 100
+    ny = 100
     n_boundary = 100
-    num_batches = 5
+    num_batches = 1
 
     trainedModel = False
     
@@ -47,7 +47,7 @@ def main():
         # Plot results
         print("Generating plots...")
         airfoil.plot(solkey='U')
-        airfoil.plot(solkey='U')
+        airfoil.plot(solkey='V')
         airfoil.plot(solkey='uv')
         airfoil.plot(solkey='uu')
         airfoil.plot(solkey='vv')

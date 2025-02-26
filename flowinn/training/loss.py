@@ -73,10 +73,16 @@ class NavierStokesLoss:
         """Compute combined physics and boundary condition losses"""
         # Get coordinates based on dimension
         if batch_data is None:
-            coords = [
-                tf.reshape(tf.convert_to_tensor(getattr(self.mesh, coord), dtype=tf.float32), [-1, 1])
-                for coord in ['x', 'y', 'z'] if hasattr(self.mesh, coord)
-            ]
+            if isinstance(self._physics_loss, NavierStokes3D):
+                coords = [
+                    tf.reshape(tf.convert_to_tensor(getattr(self.mesh, coord), dtype=tf.float32), [-1, 1])
+                    for coord in ['x', 'y', 'z']
+                ]
+            else:
+                coords = [
+                    tf.reshape(tf.convert_to_tensor(getattr(self.mesh, coord), dtype=tf.float32), [-1, 1])
+                    for coord in ['x', 'y']
+                ]
         else:
             coords = [tf.reshape(x, [-1, 1]) for x in batch_data]
 
@@ -167,27 +173,38 @@ class NavierStokesLoss:
 
     def compute_physics_loss(self, predictions, coords, tape):
         """Compute physics-based loss terms for flow equations."""
-        # Split predictions based on physics model type
         if isinstance(self._physics_loss, RANS2D):
-            # For RANS2D, expect [U, V, P, uu, vv, uv]
+            # RANS2D case
             U = predictions[:, 0]
             V = predictions[:, 1]
             P = predictions[:, 2]
-            uu = predictions[:, 3]  # Reynolds stress component <u'u'>
-            vv = predictions[:, 4]  # Reynolds stress component <v'v'>
-            uv = predictions[:, 5]  # Reynolds stress component <u'v'>
+            uu = predictions[:, 3]
+            vv = predictions[:, 4]
+            uv = predictions[:, 5]
             
-            # Get residuals from RANS2D model
             residuals = self._physics_loss.get_residuals(
                 U, V, P, uu, vv, uv, coords[0], coords[1], tape
             )
         else:
-            # For standard NS, use original splitting [u, v, p] or [u, v, w, p]
-            velocities = predictions[:, :-1]
-            pressure = predictions[:, -1]
-            residuals = self._physics_loss.get_residuals(
-                velocities, pressure, coords, tape
-            )
+            # Standard Navier-Stokes (2D or 3D)
+            is_3d = isinstance(self._physics_loss, NavierStokes3D)
+            
+            if is_3d:
+                # 3D case: [u, v, w, p]
+                velocities = predictions[:, :3]  # First 3 components are velocities
+                pressure = predictions[:, 3]     # Last component is pressure
+                # Pass all three coordinates
+                residuals = self._physics_loss.get_residuals(
+                    velocities, pressure, coords, tape
+                )
+            else:
+                # 2D case: [u, v, p]
+                velocities = predictions[:, :2]  # First 2 components are velocities
+                pressure = predictions[:, 2]     # Last component is pressure
+                # Pass only x and y coordinates
+                residuals = self._physics_loss.get_residuals(
+                    velocities, pressure, coords[:2], tape
+                )
         
         # Compute loss for each residual
         loss = 0.0
@@ -200,14 +217,14 @@ class NavierStokesLoss:
     def compute_boundary_loss(self, bc_results, vel_pred, p_pred, tape, coords):
         """Compute boundary condition losses."""
         loss = 0.0
-        n_vel_components = vel_pred.shape[-1]  # Get number of velocity components
+        is_3d = isinstance(self._physics_loss, NavierStokes3D)
+        n_vel_components = 3 if is_3d else 2
         
         for var_name, bc_info in bc_results.items():
             if bc_info is None:
                 continue
                 
             if 'value' in bc_info:
-                # Handle Dirichlet condition
                 target_value = tf.cast(bc_info['value'], tf.float32)
                 if var_name == 'p':
                     loss += tf.reduce_mean(tf.square(p_pred - target_value))

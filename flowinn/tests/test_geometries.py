@@ -4,6 +4,7 @@ from flowinn.tests.MinimalChannelFlow import MinimalChannelFlow
 from flowinn.tests.LidDrivenCavity import LidDrivenCavity
 from flowinn.tests.FlowThroughNozzle import FlowThroughNozzle
 from flowinn.tests.FlowOverAirfoil import FlowOverAirfoil
+from flowinn.tests.AirfoilRANS import AirfoilRANS
 
 def test_minimal_channel():
     try:
@@ -79,6 +80,25 @@ def test_flow_over_airfoil():
         assert True
     except Exception as e:
         pytest.fail(f"FlowOverAirfoil test failed: {str(e)}")
+
+def test_rans_airfoil():
+    try:
+        case = AirfoilRANS(
+            "test_airfoil",
+            xRange=(-2.0, 4.0),
+            yRange=(-2.0, 2.0),
+            AoA=5.0
+        )
+        case.generateMesh(Nx=100, Ny=100, NBoundary=50, sampling_method='uniform')
+        case.mesh.showMesh()
+        case.generateMesh(Nx=100, Ny=100, NBoundary=50, sampling_method='random')
+        case.mesh.showMesh()
+        case.getLossFunction()
+        case.train(epochs=10, print_interval=5, autosaveInterval=10, num_batches=2)
+        case.predict()
+        assert True
+    except Exception as e:
+        pytest.fail(f"AirfoilRANS test failed: {str(e)}")
 
 if __name__ == "__main__":
     pytest.main([__file__])

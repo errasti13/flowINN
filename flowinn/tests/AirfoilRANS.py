@@ -160,6 +160,9 @@ class AirfoilRANS:
                 'conditions': {
                     'u': {'value': u_inf},
                     'v': {'value': v_inf},
+                    'uu': {'value': 0.0},
+                    'vv': {'value': 0.0},
+                    'uv': {'value': 0.0},
                     'p': {'gradient': 0.0, 'direction': 'x'}
                 },
                 'bc_type': self.inlet_bc
@@ -189,7 +192,10 @@ class AirfoilRANS:
                 'y': None,
                 'conditions': {
                     'u': {'value': u_inf},
-                    'v': {'value': v_inf},
+                    'v': {'value': v_inf},     
+                    'uu': {'value': 0.0},
+                    'vv': {'value': 0.0},
+                    'uv': {'value': 0.0},
                     'p': {'gradient': 0.0, 'direction': 'y'}
                 },
                 'bc_type': self.wall_bc
