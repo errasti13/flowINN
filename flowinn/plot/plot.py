@@ -1,72 +1,433 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from flowinn.plot.postprocess import Postprocess
-from flowinn.mesh.mesh import Mesh  
-from typing import Optional
+from mpl_toolkits.mplot3d import Axes3D
+from matplotlib.animation import FuncAnimation
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from scipy.interpolate import griddata
+from typing import Optional, List, Dict, Tuple, Union, Any
+import os
 
+from flowinn.plot.postprocess import Postprocess
+from flowinn.mesh.mesh import Mesh
 
 class Plot:
     """
-    A class for plotting solution fields on a given mesh.
-
+    An advanced plotting class for visualizing flow solutions and mesh data.
+    
+    Features:
+    - 2D and 3D visualization
+    - Static and animated plots
+    - Multiple plot types: contour, scatter, streamlines, vector fields
+    - Interactive plots with plotly
+    - Export capabilities in various formats
+    - Customizable plot styling
+    
     Attributes:
-        mesh (Mesh): The mesh object to plot on.
-        postprocessor (Postprocess): An optional postprocessor for computing derived quantities.
+        mesh (Mesh): The mesh object to plot on
+        postprocessor (Postprocess): Optional postprocessor for computing derived quantities
+        style (dict): Plot styling configuration
     """
-
+    
     def __init__(self, mesh: Mesh) -> None:
         """
-        Initializes a new Plot object.
-
+        Initialize Plot object with mesh and default styling.
+        
         Args:
-            mesh (Mesh): The mesh object to plot on.
+            mesh (Mesh): The mesh object to plot on
         """
         if not isinstance(mesh, Mesh):
             raise TypeError("mesh must be a Mesh instance")
-
+            
         self._mesh: Mesh = mesh
         self._postprocessor: Optional[Postprocess] = None
+        
+        # Default plot styling
+        self._style = {
+            'figsize': (10, 8),
+            'dpi': 100,
+            'cmap': 'jet',
+            'scatter_size': 20,
+            'scatter_alpha': 0.6,
+            'contour_levels': 50,
+            'streamline_density': 2,
+            'streamline_color': 'white',
+            'streamline_width': 1,
+            'grid_alpha': 0.3,
+            'font_size': 12,
+            'title_size': 14,
+            'colorbar_label_size': 10,
+            'axis_label_size': 11
+        }
+
+    @property
+    def style(self) -> dict:
+        """Get current plot styling configuration."""
+        return self._style
+
+    def set_style(self, **kwargs) -> None:
+        """
+        Update plot styling configuration.
+        
+        Args:
+            **kwargs: Style parameters to update
+        """
+        self._style.update(kwargs)
+
+    def plot_contour(self, solkey: str, ax: Optional[plt.Axes] = None, 
+                    streamlines: bool = False, **kwargs) -> plt.Axes:
+        """
+        Create a contour plot of the solution field.
+        
+        Args:
+            solkey (str): Solution field to plot
+            ax (Optional[plt.Axes]): Matplotlib axes to plot on
+            streamlines (bool): Whether to overlay streamlines
+            **kwargs: Additional styling parameters
+        
+        Returns:
+            plt.Axes: The matplotlib axes object
+        """
+        if solkey not in self.mesh.solutions:
+            raise KeyError(f"Solution key '{solkey}' not found")
+            
+        # Create figure if needed
+        if ax is None:
+            fig, ax = plt.subplots(figsize=self.style['figsize'], dpi=self.style['dpi'])
+
+        # For 3D meshes, we'll plot at the middle z-plane
+        if not self.mesh.is2D and self.mesh.z is not None:
+            # Get unique z values and find the middle plane index
+            z_unique = np.unique(self.mesh.z)
+            mid_z_idx = len(z_unique) // 2
+            mid_z = z_unique[mid_z_idx]
+            
+            # Filter points in the middle z-plane (with some tolerance)
+            tol = 1e-6
+            z_mask = np.abs(self.mesh.z.flatten() - mid_z) < tol
+            x_flat = self.mesh.x.flatten()[z_mask]
+            y_flat = self.mesh.y.flatten()[z_mask]
+            sol_flat = self.mesh.solutions[solkey].flatten()[z_mask]
+        else:
+            x_flat = self.mesh.x.flatten()
+            y_flat = self.mesh.y.flatten()
+            sol_flat = self.mesh.solutions[solkey].flatten()
+            
+        # Create uniform grid for plotting
+        x_min, x_max = x_flat.min(), x_flat.max()
+        y_min, y_max = y_flat.min(), y_flat.max()
+        
+        # Create perfectly uniform grid for both contour and streamplot
+        nx, ny = 200, 200  # Increased resolution
+        x_uniform = np.linspace(x_min, x_max, nx)
+        y_uniform = np.linspace(y_min, y_max, ny)
+        grid_x, grid_y = np.meshgrid(x_uniform, y_uniform)
+        
+        # Interpolate solution onto uniform grid
+        grid_sol = griddata(
+            (x_flat, y_flat), 
+            sol_flat, 
+            (grid_x, grid_y), 
+            method='cubic',
+            fill_value=np.nan
+        )
+        
+        # Create contour plot
+        levels = kwargs.get('levels', self.style['contour_levels'])
+        cmap = kwargs.get('cmap', self.style['cmap'])
+        cp = ax.contourf(grid_x, grid_y, grid_sol, levels=levels, cmap=cmap)
+        
+        # Add streamlines if requested
+        if streamlines:
+            if 'u' not in self.mesh.solutions or 'v' not in self.mesh.solutions:
+                raise KeyError("Streamlines require 'u' and 'v' velocity components")
+                
+            # Get velocity components for the same points
+            if not self.mesh.is2D and self.mesh.z is not None:
+                u_flat = self.mesh.solutions['u'].flatten()[z_mask]
+                v_flat = self.mesh.solutions['v'].flatten()[z_mask]
+            else:
+                u_flat = self.mesh.solutions['u'].flatten()
+                v_flat = self.mesh.solutions['v'].flatten()
+                
+            # Interpolate velocity components onto the same uniform grid
+            u = griddata(
+                (x_flat, y_flat),
+                u_flat,
+                (grid_x, grid_y),
+                method='cubic',
+                fill_value=0.0
+            )
+            v = griddata(
+                (x_flat, y_flat),
+                v_flat,
+                (grid_x, grid_y),
+                method='cubic',
+                fill_value=0.0
+            )
+            
+            # Mask out regions outside the domain or with invalid values
+            mask = ~(np.isnan(grid_sol))
+            u = np.where(mask, u, 0.0)
+            v = np.where(mask, v, 0.0)
+            
+            # Add streamlines with proper density and styling
+            density = kwargs.get('streamline_density', self.style['streamline_density'])
+            color = kwargs.get('streamline_color', self.style['streamline_color'])
+            linewidth = kwargs.get('streamline_width', self.style['streamline_width'])
+            
+            # Create streamlines on the uniform grid
+            ax.streamplot(
+                x_uniform,  # Use 1D arrays for streamplot
+                y_uniform,
+                u.T,  # Transpose to match streamplot's expected format
+                v.T,
+                density=density,
+                color=color,
+                linewidth=linewidth,
+                arrowsize=1.0
+            )
+        
+        # Customize plot
+        plt.colorbar(cp, ax=ax, label=solkey)
+        title = f'{solkey} Field'
+        if not self.mesh.is2D:
+            title += f' at z/H=0.5'
+        ax.set_title(title, fontsize=self.style['title_size'])
+        ax.set_xlabel('X', fontsize=self.style['axis_label_size'])
+        ax.set_ylabel('Y', fontsize=self.style['axis_label_size'])
+        ax.set_aspect('equal')
+        
+        return ax
+
+    def plot_vector_field(self, scale: float = 1.0, skip: int = 5, 
+                         ax: Optional[plt.Axes] = None) -> plt.Axes:
+        """
+        Plot velocity vector field.
+        
+        Args:
+            scale (float): Scaling factor for vectors
+            skip (int): Plot every nth vector to avoid crowding
+            ax (Optional[plt.Axes]): Matplotlib axes to plot on
+            
+        Returns:
+            plt.Axes: The matplotlib axes object
+        """
+        if 'u' not in self.mesh.solutions or 'v' not in self.mesh.solutions:
+            raise KeyError("Vector field requires 'u' and 'v' velocity components")
+            
+        if ax is None:
+            fig, ax = plt.subplots(figsize=self.style['figsize'], dpi=self.style['dpi'])
+            
+        x = self.mesh.x[::skip]
+        y = self.mesh.y[::skip]
+        u = self.mesh.solutions['u'][::skip]
+        v = self.mesh.solutions['v'][::skip]
+        
+        # Calculate velocity magnitude for color mapping
+        magnitude = np.sqrt(u**2 + v**2)
+        
+        # Plot vectors
+        ax.quiver(x, y, u, v, magnitude,
+                 scale=scale,
+                 cmap=self.style['cmap'],
+                 width=0.005)
+                 
+        plt.colorbar(ax.collections[0], ax=ax, label='Velocity Magnitude')
+        ax.set_title('Velocity Field', fontsize=self.style['title_size'])
+        ax.set_xlabel('X', fontsize=self.style['axis_label_size'])
+        ax.set_ylabel('Y', fontsize=self.style['axis_label_size'])
+        ax.set_aspect('equal')
+        
+        return ax
+
+    def plot_3d_surface(self, solkey: str, elev: float = 30, 
+                       azim: float = 45) -> plt.Axes:
+        """
+        Create a 3D surface plot of the solution field.
+        
+        Args:
+            solkey (str): Solution field to plot
+            elev (float): Elevation viewing angle
+            azim (float): Azimuth viewing angle
+            
+        Returns:
+            plt.Axes: The matplotlib axes object
+        """
+        if solkey not in self.mesh.solutions:
+            raise KeyError(f"Solution key '{solkey}' not found")
+            
+        fig = plt.figure(figsize=self.style['figsize'], dpi=self.style['dpi'])
+        ax = fig.add_subplot(111, projection='3d')
+        
+        x, y = self.mesh.x, self.mesh.y
+        grid_x, grid_y = np.meshgrid(
+            np.linspace(x.min(), x.max(), 100),
+            np.linspace(y.min(), y.max(), 100)
+        )
+        
+        sol = self.mesh.solutions[solkey]
+        grid_sol = griddata((x.flatten(), y.flatten()), sol.flatten(),
+                          (grid_x, grid_y), method='cubic')
+                          
+        surf = ax.plot_surface(grid_x, grid_y, grid_sol,
+                             cmap=self.style['cmap'],
+                             linewidth=0,
+                             antialiased=True)
+                             
+        plt.colorbar(surf, ax=ax, label=solkey)
+        ax.set_title(f'3D {solkey} Field', fontsize=self.style['title_size'])
+        ax.set_xlabel('X', fontsize=self.style['axis_label_size'])
+        ax.set_ylabel('Y', fontsize=self.style['axis_label_size'])
+        ax.set_zlabel(solkey, fontsize=self.style['axis_label_size'])
+        
+        ax.view_init(elev=elev, azim=azim)
+        return ax
+
+    def create_animation(self, solkey: str, frames: List[np.ndarray], 
+                        interval: int = 50) -> FuncAnimation:
+        """
+        Create an animation of time-varying solution fields.
+        
+        Args:
+            solkey (str): Solution field to animate
+            frames (List[np.ndarray]): List of solution arrays for each time step
+            interval (int): Time between frames in milliseconds
+            
+        Returns:
+            FuncAnimation: The animation object
+        """
+        fig, ax = plt.subplots(figsize=self.style['figsize'], dpi=self.style['dpi'])
+        
+        x, y = self.mesh.x, self.mesh.y
+        grid_x, grid_y = np.meshgrid(
+            np.linspace(x.min(), x.max(), 100),
+            np.linspace(y.min(), y.max(), 100)
+        )
+        
+        def update(frame):
+            ax.clear()
+            grid_sol = griddata((x.flatten(), y.flatten()), frame.flatten(),
+                              (grid_x, grid_y), method='cubic')
+            cp = ax.contourf(grid_x, grid_y, grid_sol,
+                           levels=self.style['contour_levels'],
+                           cmap=self.style['cmap'])
+            return [cp]
+            
+        anim = FuncAnimation(fig, update, frames=frames,
+                           interval=interval, blit=True)
+        return anim
+
+    def plot_interactive(self, solkey: str) -> None:
+        """
+        Create an interactive plot using plotly.
+        
+        Args:
+            solkey (str): Solution field to plot
+        """
+        if solkey not in self.mesh.solutions:
+            raise KeyError(f"Solution key '{solkey}' not found")
+            
+        x, y = self.mesh.x, self.mesh.y
+        sol = self.mesh.solutions[solkey]
+        
+        fig = go.Figure(data=[
+            go.Scatter(
+                x=x.flatten(),
+                y=y.flatten(),
+                mode='markers',
+                marker=dict(
+                    size=5,
+                    color=sol.flatten(),
+                    colorscale='Jet',
+                    showscale=True,
+                    colorbar=dict(title=solkey)
+                )
+            )
+        ])
+        
+        fig.update_layout(
+            title=f'Interactive {solkey} Field',
+            xaxis_title='X',
+            yaxis_title='Y',
+            width=800,
+            height=600
+        )
+        
+        fig.show()
+
+    def export_plot(self, filename: str, solkey: str, **kwargs) -> None:
+        """
+        Export plot to various file formats.
+        
+        Args:
+            filename (str): Output filename with extension
+            solkey (str): Solution field to plot
+            **kwargs: Additional plotting parameters
+        """
+        extension = os.path.splitext(filename)[1].lower()
+        
+        fig, ax = plt.subplots(figsize=self.style['figsize'], dpi=self.style['dpi'])
+        self.plot_contour(solkey, ax=ax, **kwargs)
+        
+        if extension in ['.png', '.jpg', '.jpeg', '.pdf', '.svg']:
+            plt.savefig(filename, bbox_inches='tight', dpi=self.style['dpi'])
+        else:
+            raise ValueError(f"Unsupported file format: {extension}")
+        
+        plt.close(fig)
+
+    def plot_comparison(self, solkeys: List[str], titles: Optional[List[str]] = None,
+                       layout: Tuple[int, int] = None) -> None:
+        """
+        Create a multi-panel comparison plot of different solution fields.
+        
+        Args:
+            solkeys (List[str]): List of solution fields to compare
+            titles (Optional[List[str]]): List of subplot titles
+            layout (Tuple[int, int]): Number of rows and columns for subplots
+        """
+        n = len(solkeys)
+        if not layout:
+            cols = min(3, n)
+            rows = (n + cols - 1) // cols
+        else:
+            rows, cols = layout
+            
+        fig, axes = plt.subplots(rows, cols,
+                                figsize=(cols*6, rows*5),
+                                dpi=self.style['dpi'])
+        if n == 1:
+            axes = np.array([axes])
+        axes = axes.flatten()
+        
+        for i, (ax, key) in enumerate(zip(axes, solkeys)):
+            self.plot_contour(key, ax=ax)
+            if titles:
+                ax.set_title(titles[i], fontsize=self.style['title_size'])
+                
+        # Hide empty subplots
+        for ax in axes[len(solkeys):]:
+            ax.set_visible(False)
+            
+        plt.tight_layout()
 
     @property
     def mesh(self) -> Mesh:
-        """
-        Returns the mesh object.
-        """
         return self._mesh
 
     @mesh.setter
     def mesh(self, value: Mesh) -> None:
-        """
-        Sets the mesh object.
-
-        Args:
-            value (Mesh): The new mesh object.
-
-        Raises:
-            TypeError: If value is not a Mesh instance.
-        """
         if not isinstance(value, Mesh):
             raise TypeError("mesh must be a Mesh instance")
         self._mesh = value
 
     @property
     def postprocessor(self) -> Optional[Postprocess]:
-        """
-        Returns the postprocessor object.
-        """
         return self._postprocessor
 
     @postprocessor.setter
     def postprocessor(self, value: Postprocess) -> None:
-        """
-        Sets the postprocessor object.
-
-        Args:
-            value (Postprocess): The new postprocessor object.
-
-        Raises:
-            TypeError: If value is not a Postprocess instance.
-        """
         if not isinstance(value, Postprocess):
             raise TypeError("postprocessor must be a Postprocess instance")
         self._postprocessor = value
@@ -216,7 +577,6 @@ class Plot:
             plt.grid(True, linestyle='--', alpha=0.3, zorder=1)
 
             plt.tight_layout()
-            plt.show()
 
         plt.tight_layout()
         plt.show()
