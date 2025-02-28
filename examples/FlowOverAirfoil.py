@@ -9,13 +9,13 @@ def main():
     angle_of_attack = 10.0  # Degrees
     
     # Training parameters
-    epochs = 100
+    epochs = 10000
     print_interval = 100
     autosave_interval = 10000
     
     # Mesh parameters
-    nx = 80
-    ny = 60
+    nx = 200
+    ny = 200
     n_boundary = 200
     num_batches = 10
 
@@ -56,6 +56,10 @@ def main():
         airfoil.plot(solkey='v')  # Velocity in y-direction
         airfoil.plot(solkey='p')  # Pressure field
         airfoil.plot(solkey='vMag')  # Velocity magnitude
+        
+        # Vector field visualization
+        print("Creating vector field plot...")
+        airfoil.plot(plot_type='quiver', scale=30, density=1)
         
         print("Simulation and visualization completed successfully!")
         

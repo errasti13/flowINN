@@ -308,21 +308,23 @@ class FlowOverAirfoil:
             solkey (str): Solution field to plot ('u', 'v', 'p', 'vMag')
             plot_type (str): Type of plot to create:
                 - 'default': Scatter plot with boundaries
+                - 'quiver': Vector field plot showing flow direction
                 - 'slices': Multiple y-plane slices (3D only)
             **kwargs: Additional plotting parameters
         """
         if not hasattr(self, 'Plot'):
             self.generate_plots()
 
-        if solkey not in self.mesh.solutions:
-            available_keys = list(self.mesh.solutions.keys())
-            raise ValueError(
-                f"Invalid solution key '{solkey}'. "
-                f"Available keys: {available_keys}. "
-                f"Note: 'vMag' is automatically calculated during prediction."
-            )
-
-        if plot_type == 'default':
+        if plot_type == 'quiver':
+            self.Plot.vectorField(xRange=self.xRange, yRange=self.yRange, **kwargs)
+        elif plot_type == 'default':
+            if solkey not in self.mesh.solutions:
+                available_keys = list(self.mesh.solutions.keys())
+                raise ValueError(
+                    f"Invalid solution key '{solkey}'. "
+                    f"Available keys: {available_keys}. "
+                    f"Note: 'vMag' is automatically calculated during prediction."
+                )
             self.Plot.scatterPlot(solkey)
         elif plot_type == 'slices':
             if self.mesh.is2D:
@@ -352,12 +354,20 @@ class FlowOverAirfoil:
         if not hasattr(self, 'Plot'):
             self.generate_plots()
         
+        # Export standard field plots
         for solkey in ['u', 'v', 'p', 'vMag']:
             plt.figure()
             self.Plot.scatterPlot(solkey)
             filename = os.path.join(directory, f"{self.problemTag}_AoA{self.AoA}_{solkey}{format}")
             plt.savefig(filename, bbox_inches='tight', dpi=self.Plot.style['dpi'])
             plt.close()
+        
+        # Export vector field plot
+        plt.figure(figsize=self.Plot.style['figsize'])
+        self.plot(plot_type='quiver')
+        filename = os.path.join(directory, f"{self.problemTag}_AoA{self.AoA}_quiver{format}")
+        plt.savefig(filename, bbox_inches='tight', dpi=self.Plot.style['dpi'])
+        plt.close()
 
     def load_model(self):
         self.model.load(self.problemTag)
