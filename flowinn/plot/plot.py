@@ -44,11 +44,11 @@ class Plot:
         
         # Default plot styling
         self._style = {
-            'figsize': (10, 8),
-            'dpi': 100,
-            'cmap': 'jet',
-            'scatter_size': 20,
-            'scatter_alpha': 0.6,
+            'figsize': (12, 8),
+            'dpi': 300,
+            'cmap': 'viridis',
+            'scatter_size': 15,
+            'scatter_alpha': 0.7,
             'contour_levels': 50,
             'streamline_density': 2,
             'streamline_color': 'white',
@@ -667,4 +667,68 @@ class Plot:
 
         plt.tight_layout()
         plt.show()
+
+    def vectorField(self, xRange=None, yRange=None, scale=50, density=2):
+        """
+        Create a vector field plot using quiver.
+        
+        Args:
+            xRange (tuple): Domain x-range (min_x, max_x)
+            yRange (tuple): Domain y-range (min_y, max_y)
+            scale (float): Scaling factor for arrows (default: 50)
+            density (int): Arrow density (default: 2)
+        """
+        if not all(key in self.mesh.solutions for key in ['u', 'v']):
+            raise ValueError("Velocity components 'u' and 'v' are required for vector field plots")
+        
+        # Use provided ranges or fall back to mesh extents
+        xMin = xRange[0] if xRange is not None else self.mesh.x.min()
+        xMax = xRange[1] if xRange is not None else self.mesh.x.max()
+        yMin = yRange[0] if yRange is not None else self.mesh.y.min()
+        yMax = yRange[1] if yRange is not None else self.mesh.y.max()
+        
+        # Create a regular grid for interpolation
+        nx, ny = 50, 50  # Number of points in each direction
+        x = np.linspace(xMin, xMax, nx)
+        y = np.linspace(yMin, yMax, ny)
+        X, Y = np.meshgrid(x, y)
+        
+        # Interpolate velocity components onto regular grid
+        from scipy.interpolate import griddata
+        points = np.column_stack((self.mesh.x.flatten(), self.mesh.y.flatten()))
+        U = griddata(points, self.mesh.solutions['u'], (X, Y), method='cubic')
+        V = griddata(points, self.mesh.solutions['v'], (X, Y), method='cubic')
+        
+        skip = (slice(None, None, density), slice(None, None, density))
+        
+        plt.figure(figsize=self.style['figsize'])
+        plt.quiver(X[skip], Y[skip], U[skip], V[skip], 
+                  np.sqrt(U[skip]**2 + V[skip]**2),
+                  scale=scale, cmap=self.style['cmap'])
+        plt.colorbar(label='Velocity Magnitude')
+        
+        # Plot boundaries if they exist
+        self._plotBoundaries()
+        
+        plt.axis('equal')
+        plt.xlabel('x')
+        plt.ylabel('y')
+        plt.title('Flow Field')
+        plt.show()
+
+    def _plotBoundaries(self):
+        """Plot exterior and interior boundaries if they exist."""
+        # Plot exterior boundaries
+        if hasattr(self.mesh, 'boundaries'):
+            for boundary_data in self.mesh.boundaries.values():
+                if 'x' in boundary_data and 'y' in boundary_data:
+                    plt.plot(boundary_data['x'], boundary_data['y'],
+                            'k-', linewidth=1.5, zorder=3)
+        
+        # Plot interior boundaries (e.g., airfoil)
+        if hasattr(self.mesh, 'interiorBoundaries'):
+            for boundary_data in self.mesh.interiorBoundaries.values():
+                if 'x' in boundary_data and 'y' in boundary_data:
+                    plt.plot(boundary_data['x'], boundary_data['y'],
+                            'r-', linewidth=2, zorder=3)
 
