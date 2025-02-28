@@ -6,6 +6,8 @@ from flowinn.models.model import PINN
 from flowinn.training.loss import NavierStokesLoss
 from flowinn.plot.plot import Plot
 from flowinn.physics.boundary_conditions import InletBC, OutletBC, WallBC 
+import matplotlib.pyplot as plt
+import os
 
 class FlowOverAirfoil:
     def __init__(self, caseName: str, xRange: Tuple[float, float], yRange: Tuple[float, float], AoA: float = 0.0):
@@ -246,16 +248,22 @@ class FlowOverAirfoil:
             X = (np.hstack((self.mesh.x.flatten()[:, None], self.mesh.y.flatten()[:, None])))
             sol = self.model.predict(X)
 
+            # Store primary solution components
             self.mesh.solutions['u'] = sol[:, 0]
             self.mesh.solutions['v'] = sol[:, 1]
             self.mesh.solutions['p'] = sol[:, 2]
+
+            # Calculate and store velocity magnitude
+            self.mesh.solutions['vMag'] = np.sqrt(
+                self.mesh.solutions['u']**2 + 
+                self.mesh.solutions['v']**2
+            )
 
             self.generate_plots()
             
             # Write solution to Tecplot file
             self.write_solution()
 
-            return
         except Exception as e:
             self.logger.error(f"Prediction failed: {str(e)}")
             raise
@@ -279,10 +287,77 @@ class FlowOverAirfoil:
             raise
     
     def generate_plots(self):
+        """Initialize plotting object with custom styling."""
         self.Plot = Plot(self.mesh)
+        self.Plot.set_style(
+            figsize=(12, 8),
+            cmap='viridis',
+            scatter_size=15,
+            scatter_alpha=0.7,
+            font_size=12,
+            title_size=14,
+            colorbar_label_size=10,
+            axis_label_size=11
+        )
 
-    def plot(self, solkey = 'u', streamlines = False):
-        self.Plot.scatterPlot(solkey)
+    def plot(self, solkey='u', plot_type='default', **kwargs):
+        """
+        Create various types of plots for the solution fields.
+        
+        Args:
+            solkey (str): Solution field to plot ('u', 'v', 'p', 'vMag')
+            plot_type (str): Type of plot to create:
+                - 'default': Scatter plot with boundaries
+                - 'slices': Multiple y-plane slices (3D only)
+            **kwargs: Additional plotting parameters
+        """
+        if not hasattr(self, 'Plot'):
+            self.generate_plots()
+
+        if solkey not in self.mesh.solutions:
+            available_keys = list(self.mesh.solutions.keys())
+            raise ValueError(
+                f"Invalid solution key '{solkey}'. "
+                f"Available keys: {available_keys}. "
+                f"Note: 'vMag' is automatically calculated during prediction."
+            )
+
+        if plot_type == 'default':
+            self.Plot.scatterPlot(solkey)
+        elif plot_type == 'slices':
+            if self.mesh.is2D:
+                raise ValueError("Slice plotting is only available for 3D meshes")
+            self.Plot.plotSlices(solkey, **kwargs)
+        else:
+            raise ValueError(f"Invalid plot type: {plot_type}")
+
+    def export_plots(self, directory="results", format=".png"):
+        """
+        Export all solution field plots to files.
+        
+        Args:
+            directory (str): Directory to save plots
+            format (str): File format ('.png', '.pdf', '.svg', etc.)
+        """
+        os.makedirs(directory, exist_ok=True)
+        
+        # Ensure all fields are available
+        if not all(key in self.mesh.solutions for key in ['u', 'v', 'p', 'vMag']):
+            raise ValueError(
+                "Missing required solution components. "
+                "Make sure to run predict() before exporting plots."
+            )
+        
+        # Ensure Plot object exists
+        if not hasattr(self, 'Plot'):
+            self.generate_plots()
+        
+        for solkey in ['u', 'v', 'p', 'vMag']:
+            plt.figure()
+            self.Plot.scatterPlot(solkey)
+            filename = os.path.join(directory, f"{self.problemTag}_AoA{self.AoA}_{solkey}{format}")
+            plt.savefig(filename, bbox_inches='tight', dpi=self.Plot.style['dpi'])
+            plt.close()
 
     def load_model(self):
         self.model.load(self.problemTag)
