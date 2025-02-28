@@ -9,7 +9,7 @@ def main():
     z_range = (0.0, 1.0)   # Channel width
     
     # Training parameters
-    epochs = 1000
+    epochs = 100
     print_interval = 100
     autosave_interval = 10000
     
@@ -32,6 +32,7 @@ def main():
                            NBoundary=n_boundary, 
                            sampling_method='uniform')
         channel.mesh.showMesh()
+
         # Train the model
         if trainedModel:
             print("Loading pre-trained model...")
@@ -41,20 +42,34 @@ def main():
             channel.train(epochs=epochs, 
                         print_interval=print_interval,
                         autosaveInterval=autosave_interval,
-                        num_batches=num_batches)  # Add num_batches parameter
+                        num_batches=num_batches)
         
         # Predict and visualize
         print("Predicting flow field...")
         channel.predict()
         
-        # Plot results
-        print("Generating plots...")
+        # Create various plots
+        print("\nGenerating plots...")
+        
+        # 1. Default scatter plots
+        print("Creating scatter plots...")
         channel.plot(solkey='u')  # Velocity in x-direction
         channel.plot(solkey='v')  # Velocity in y-direction
         channel.plot(solkey='w')  # Velocity in z-direction
         channel.plot(solkey='p')  # Pressure field
+        channel.plot(solkey='vMag')  # Velocity magnitude
         
-        print("Simulation completed successfully!")
+        # 2. 3D scatter plots
+        print("Creating 3D scatter plots...")
+        channel.plot(solkey='vMag', plot_type='3d')
+        
+        # 3. Z-plane slices
+        print("Creating slice plots...")
+        channel.plot(solkey='vMag', plot_type='slices', 
+                    z_cuts=[0.25, 0.5, 0.75],
+                    num_points=100)
+        
+        print("Simulation and visualization completed successfully!")
         
     except Exception as e:
         print(f"Error during simulation: {str(e)}")

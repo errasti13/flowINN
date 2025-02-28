@@ -6,6 +6,7 @@ from flowinn.models.model import PINN
 from flowinn.training.loss import NavierStokesLoss
 from flowinn.plot.plot import Plot
 from flowinn.physics.boundary_conditions import InletBC, OutletBC, WallBC
+import matplotlib.pyplot as plt
 
 class MinimalChannelFlow:
     def __init__(self, caseName: str, xRange: Tuple[float, float], 
@@ -327,6 +328,11 @@ class MinimalChannelFlow:
             self.mesh.solutions['w'] = sol[:, 2]
             self.mesh.solutions['p'] = sol[:, 3]
 
+            # Calculate velocity magnitude
+            self.mesh.solutions['vMag'] = np.sqrt(
+                sol[:, 0]**2 + sol[:, 1]**2 + sol[:, 2]**2
+            )
+
             self.generate_plots()
             self.write_solution()
             
@@ -352,12 +358,64 @@ class MinimalChannelFlow:
             raise
 
     def generate_plots(self):
+        """Initialize plotting object with custom styling."""
         self.Plot = Plot(self.mesh)
+        self.Plot.set_style(
+            figsize=(12, 8),
+            cmap='viridis',
+            contour_levels=100,
+            streamline_color='white',
+            streamline_density=3
+        )
 
-    def plot(self, solkey='u'):
-        self.Plot.scatterPlot(solkey)
-        if not self.is2D:
-            self.Plot.plotSlices(solkey)
+    def plot(self, solkey='u', plot_type='default', **kwargs):
+        """
+        Create various types of plots for the solution fields.
+        
+        Args:
+            solkey (str): Solution field to plot ('u', 'v', 'w', 'p', 'vMag')
+            plot_type (str): Type of plot to create:
+                - 'default': Scatter plot with boundaries
+                - '3d': 3D scatter plot
+                - 'slices': Multiple z-plane slices (3D only)
+            **kwargs: Additional plotting parameters
+        """
+        if not hasattr(self, 'Plot'):
+            self.generate_plots()
+
+        if solkey not in self.mesh.solutions:
+            raise ValueError(f"Invalid solution key. Available keys: {list(self.mesh.solutions.keys())}")
+
+        if plot_type == 'default':
+            self.Plot.scatterPlot(solkey)
+        elif plot_type == '3d':
+            if self.mesh.is2D:
+                raise ValueError("3D plotting is only available for 3D meshes")
+            self.Plot.scatterPlot(solkey)  # This will automatically use 3D for 3D meshes
+        elif plot_type == 'slices':
+            if self.mesh.is2D:
+                raise ValueError("Slice plotting is only available for 3D meshes")
+            self.Plot.plotSlices(solkey, **kwargs)
+        else:
+            raise ValueError(f"Invalid plot type: {plot_type}")
+
+    def export_plots(self, directory="results", format=".png"):
+        """
+        Export all solution field plots to files.
+        
+        Args:
+            directory (str): Directory to save plots
+            format (str): File format ('.png', '.pdf', '.svg', etc.)
+        """
+        import os
+        os.makedirs(directory, exist_ok=True)
+        
+        for solkey in ['u', 'v', 'w', 'p', 'vMag']:
+            plt.figure()
+            self.Plot.scatterPlot(solkey)
+            filename = os.path.join(directory, f"{self.problemTag}_{solkey}{format}")
+            plt.savefig(filename, bbox_inches='tight', dpi=self.style['dpi'])
+            plt.close()
 
     def load_model(self):
         self.model.load(self.problemTag)
