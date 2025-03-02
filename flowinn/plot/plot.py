@@ -487,12 +487,13 @@ class Plot:
         plt.tight_layout()
         plt.show()
 
-    def scatterPlot(self, solkey: str) -> None:
+    def scatterPlot(self, solkey: str, title: str = None) -> None:
         """
         Visualizes the solution field using scatter plot with boundaries.
 
         Args:
             solkey (str): The key of the solution field to plot.
+            title (str, optional): Custom title for the plot. If None, uses solkey.
         """
         x = self.mesh.x.flatten()
         y = self.mesh.y.flatten()
@@ -525,12 +526,12 @@ class Plot:
             ax.set_zlim(mid_z - max_range*0.5, mid_z + max_range*0.5)
 
             plt.colorbar(scatter, label=solkey)
-            plt.title(f'Solution Field: {solkey}')
+            plt.title(title if title else f'Solution Field: {solkey}')
 
         else:
             sol = self.mesh.solutions[solkey]
             plt.figure(figsize=(10, 8))
-            plt.title(f'Solution Field: {solkey}', fontsize=12)
+            plt.title(title if title else f'Solution Field: {solkey}', fontsize=12)
 
             plt.set_cmap('viridis')
 
