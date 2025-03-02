@@ -1,8 +1,9 @@
 import tensorflow as tf
 import matplotlib.pyplot as plt
-from typing import List
+from typing import List, Optional, Tuple, Callable
 import os
 import numpy as np
+from flowinn.plot.boundary_visualization import BoundaryVisualization
 
 
 class PINN:
@@ -35,6 +36,7 @@ class PINN:
         self.optimizer: tf.keras.optimizers.Adam = tf.keras.optimizers.Adam(
             learning_rate=self.learning_rate_schedule(learning_rate))
         self.eq: str = eq
+        self.boundary_visualizer: Optional[BoundaryVisualization] = None
 
     def create_model(self, input_shape: int, output_shape: int, layers: List[int], activation: str) -> tf.keras.Sequential:
         """
@@ -127,7 +129,10 @@ class PINN:
 
     def train(self, loss_function, mesh, epochs: int = 1000, num_batches: int = 1,
               print_interval: int = 100, autosave_interval: int = 100,
-              plot_loss: bool = False) -> None:
+              plot_loss: bool = False, bc_plot_interval: Optional[int] = None, 
+              domain_range: Optional[Tuple[Tuple[float, float], Tuple[float, float]]] = None,
+              airfoil_coords: Optional[Tuple[np.ndarray, np.ndarray]] = None,
+              output_dir: str = 'bc_plots') -> None:
         """
         Trains the PINN model using batch training.
 
@@ -139,9 +144,17 @@ class PINN:
             print_interval: Interval for printing progress
             autosave_interval: Interval for saving the model
             plot_loss: Whether to plot the loss during training
+            bc_plot_interval: Interval for plotting boundary condition errors
+            domain_range: Optional tuple of ((x_min, x_max), (y_min, y_max)) for domain boundaries
+            airfoil_coords: Optional tuple of (x_coords, y_coords) for airfoil or other interior boundary
+            output_dir: Directory where boundary condition plots will be saved
         """
         loss_history = []
         epoch_history = []
+
+        # Initialize boundary condition visualization if needed
+        if bc_plot_interval is not None:
+            self.boundary_visualizer = BoundaryVisualization(output_dir=output_dir)
 
         if plot_loss:
             plt.ion()
@@ -179,6 +192,12 @@ class PINN:
                     plt.pause(0.001)
 
                 print(f"Epoch {epoch + 1}: Loss = {epoch_loss.numpy()}")
+            
+            # Plot boundary condition errors if requested
+            if self.boundary_visualizer is not None and bc_plot_interval is not None and (epoch + 1) % bc_plot_interval == 0:
+                self.boundary_visualizer.plot_boundary_conditions(
+                    self, mesh, epoch + 1, domain_range, airfoil_coords
+                )
 
             if (epoch + 1) % autosave_interval == 0:
                 os.makedirs('trainedModels', exist_ok=True)
@@ -187,6 +206,10 @@ class PINN:
                 except OSError as e:
                     print(f"Error saving model: {e}")
                     raise
+
+        # Plot boundary condition error evolution at the end of training
+        if self.boundary_visualizer is not None:
+            self.boundary_visualizer.plot_error_evolution()
 
         if plot_loss:
             plt.ioff()
