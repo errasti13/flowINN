@@ -69,14 +69,26 @@ class NavierStokes2D(NavierStokes):
             [u_x, u_y, v_x, v_y], [x, y], tape
         )
 
-        # Continuity equation
+        # Continuity equation (unchanged)
         continuity = u_x + v_y
 
-        # Momentum equations
-        momentum_x = u * u_x + v * u_y + p_x - self.nu * (u_xx + u_yy)
-        momentum_y = u * v_x + v * v_y + p_y - self.nu * (v_xx + v_yy)
+        # Momentum equations with corrected signs
+        # Note: The convention is to move all terms to the left side of the equation
+        # Du/Dt + (1/ρ)∂p/∂x - ν∇²u = 0
+        momentum_x = (
+            u * u_x + v * u_y +        # Convective acceleration
+            p_x -                      # Pressure gradient (removed 1/rho as it's handled in loss.py)
+            self.nu * (u_xx + u_yy)    # Viscous diffusion
+        )
+        
+        # Dv/Dt + (1/ρ)∂p/∂y - ν∇²v = 0
+        momentum_y = (
+            u * v_x + v * v_y +        # Convective acceleration
+            p_y -                      # Pressure gradient (removed 1/rho as it's handled in loss.py)
+            self.nu * (v_xx + v_yy)    # Viscous diffusion
+        )
 
-        # Reshape residuals to ensure consistent shape
+        # Reshape residuals
         continuity = tf.reshape(continuity, [-1])
         momentum_x = tf.reshape(momentum_x, [-1])
         momentum_y = tf.reshape(momentum_y, [-1])
