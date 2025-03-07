@@ -1,6 +1,6 @@
 import tensorflow as tf
 from typing import Tuple
-from .steadyNS import NavierStokes
+from .navier_stokes import NavierStokes
 
 class UnsteadyNavierStokes3D(NavierStokes):
     """3D Unsteady Navier-Stokes equations solver."""
