@@ -1,5 +1,5 @@
-from flowinn.physics.steady_2D import NavierStokes2D
-from flowinn.physics.steady_3D import NavierStokes3D
+from flowinn.physics.steady_2D import SteadyNavierStokes2D
+from flowinn.physics.steady_3D import SteadyNavierStokes3D
 import tensorflow as tf
 
 class NavierStokesLoss:
@@ -10,9 +10,9 @@ class NavierStokesLoss:
         
         # Initialize physics model based on type
         if physics_model == 'NS2D':
-            self._physics_loss = NavierStokes2D()
+            self._physics_loss = SteadyNavierStokes2D()
         elif physics_model == 'NS3D':
-            self._physics_loss = NavierStokes3D()
+            self._physics_loss = SteadyNavierStokes3D()
         else:
             raise ValueError(f"Unknown physics model: {physics_model}")
 

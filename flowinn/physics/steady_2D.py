@@ -2,7 +2,7 @@ import tensorflow as tf
 from typing import Tuple
 from .navier_stokes import NavierStokes
 
-class UnsteadyNavierStokes2D(NavierStokes):
+class SteadyNavierStokes2D(NavierStokes):
     """2D Unsteady Navier-Stokes equations solver."""
 
     def get_residuals(self, velocities: tf.Tensor, pressure: tf.Tensor, coords: list, tape) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
