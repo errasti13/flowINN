@@ -43,8 +43,8 @@ class NavierStokesLoss:
 
     @physics_loss.setter
     def physics_loss(self, value):
-        if not isinstance(value, (NavierStokes2D, NavierStokes3D)):
-            raise TypeError("physics_loss must be NavierStokes2D or NavierStokes3D")
+        if not isinstance(value, (SteadyNavierStokes2D, SteadyNavierStokes3D)):
+            raise TypeError("physics_loss must be SteadyNavierStokes2D or SteadyNavierStokes3D")
         self._physics_loss = value
 
     @property
@@ -71,7 +71,7 @@ class NavierStokesLoss:
         """Compute combined physics and boundary condition losses"""
         # Get coordinates based on dimension
         if batch_data is None:
-            if isinstance(self._physics_loss, NavierStokes3D):
+            if isinstance(self._physics_loss, SteadyNavierStokes3D):
                 coords = [
                     tf.reshape(tf.convert_to_tensor(getattr(self.mesh, coord), dtype=tf.float32), [-1, 1])
                     for coord in ['x', 'y', 'z']
@@ -171,7 +171,7 @@ class NavierStokesLoss:
 
     def compute_physics_loss(self, predictions, coords, tape):
         """Compute physics-based loss terms for flow equations."""
-        is_3d = isinstance(self._physics_loss, NavierStokes3D)
+        is_3d = isinstance(self._physics_loss, SteadyNavierStokes3D)
         n_vel_components = 3 if is_3d else 2
         
         # Split predictions into velocities and pressure
@@ -196,7 +196,7 @@ class NavierStokesLoss:
     def compute_boundary_loss(self, bc_results, vel_pred, p_pred, tape, coords):
         """Compute boundary condition losses."""
         loss = 0.0
-        is_3d = isinstance(self._physics_loss, NavierStokes3D)
+        is_3d = isinstance(self._physics_loss, SteadyNavierStokes3D)
         n_vel_components = 3 if is_3d else 2
         
         for var_name, bc_info in bc_results.items():
