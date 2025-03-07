@@ -1,5 +1,4 @@
 from flowinn.physics.steadyNS import NavierStokes2D, NavierStokes3D
-from flowinn.physics.RANS2D import RANS2D
 import tensorflow as tf
 
 class NavierStokesLoss:
@@ -13,8 +12,6 @@ class NavierStokesLoss:
             self._physics_loss = NavierStokes2D()
         elif physics_model == 'NS3D':
             self._physics_loss = NavierStokes3D()
-        elif physics_model == 'RANS2D':
-            self._physics_loss = RANS2D(nu=self._nu)
         else:
             raise ValueError(f"Unknown physics model: {physics_model}")
 
@@ -45,8 +42,8 @@ class NavierStokesLoss:
 
     @physics_loss.setter
     def physics_loss(self, value):
-        if not isinstance(value, (NavierStokes2D, NavierStokes3D, RANS2D)):
-            raise TypeError("physics_loss must be NavierStokes2D, NavierStokes3D, or RANS2D")
+        if not isinstance(value, (NavierStokes2D, NavierStokes3D)):
+            raise TypeError("physics_loss must be NavierStokes2D or NavierStokes3D")
         self._physics_loss = value
 
     @property
@@ -173,38 +170,22 @@ class NavierStokesLoss:
 
     def compute_physics_loss(self, predictions, coords, tape):
         """Compute physics-based loss terms for flow equations."""
-        if isinstance(self._physics_loss, RANS2D):
-            # RANS2D case
-            U = predictions[:, 0]
-            V = predictions[:, 1]
-            P = predictions[:, 2]
-            uu = predictions[:, 3]
-            vv = predictions[:, 4]
-            uv = predictions[:, 5]
-            
+        if not self.mesh.is2D:
+            # 3D case: [u, v, w, p]
+            velocities = predictions[:, :3]  # First 3 components are velocities
+            pressure = predictions[:, 3]     # Last component is pressure
+            # Pass all three coordinates
             residuals = self._physics_loss.get_residuals(
-                U, V, P, uu, vv, uv, coords[0], coords[1], tape
+                velocities, pressure, coords, tape
             )
         else:
-            # Standard Navier-Stokes (2D or 3D)
-            is_3d = isinstance(self._physics_loss, NavierStokes3D)
-            
-            if is_3d:
-                # 3D case: [u, v, w, p]
-                velocities = predictions[:, :3]  # First 3 components are velocities
-                pressure = predictions[:, 3]     # Last component is pressure
-                # Pass all three coordinates
-                residuals = self._physics_loss.get_residuals(
-                    velocities, pressure, coords, tape
-                )
-            else:
-                # 2D case: [u, v, p]
-                velocities = predictions[:, :2]  # First 2 components are velocities
-                pressure = predictions[:, 2]     # Last component is pressure
-                # Pass only x and y coordinates
-                residuals = self._physics_loss.get_residuals(
-                    velocities, pressure, coords[:2], tape
-                )
+            # 2D case: [u, v, p]
+            velocities = predictions[:, :2]  # First 2 components are velocities
+            pressure = predictions[:, 2]     # Last component is pressure
+            # Pass only x and y coordinates
+            residuals = self._physics_loss.get_residuals(
+                velocities, pressure, coords[:2], tape
+            )
         
         # Compute loss for each residual
         loss = 0.0

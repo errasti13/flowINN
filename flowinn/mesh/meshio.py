@@ -158,10 +158,6 @@ class MeshIO:
             if 'u' in self.solutions or 'U' in self.solutions:
                 flow_vars.extend(['u', 'v', 'p'])
 
-            # Add RANS variables if present
-            if 'uu' in self.solutions:
-                flow_vars.extend(['uu', 'vv', 'uv'])
-
             variables = basic_vars + flow_vars
 
             # Write header
