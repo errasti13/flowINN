@@ -1,4 +1,5 @@
-from flowinn.physics.steadyNS import NavierStokes2D, NavierStokes3D
+from flowinn.physics.steady_2D import NavierStokes2D
+from flowinn.physics.steady_3D import NavierStokes3D
 import tensorflow as tf
 
 class NavierStokesLoss:
