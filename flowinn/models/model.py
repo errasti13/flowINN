@@ -1,36 +1,45 @@
 import tensorflow as tf
 import matplotlib.pyplot as plt
-from typing import List, Optional, Tuple, Callable
+from typing import List, Optional, Tuple
 import os
 import numpy as np
 from flowinn.plot.boundary_visualization import BoundaryVisualization
 
+# Custom Fourier Feature Mapping layer
+class FourierFeatureMapping(tf.keras.layers.Layer):
+    def __init__(self, mapping_size: int = 64, scale: float = 10.0, **kwargs):
+        """
+        Args:
+            mapping_size (int): The number of random Fourier features.
+            scale (float): Scale factor for the random weights.
+        """
+        super(FourierFeatureMapping, self).__init__(**kwargs)
+        self.mapping_size = mapping_size
+        self.scale = scale
+
+    def build(self, input_shape):
+        # Create a fixed random projection matrix (non-trainable)
+        self.B = self.add_weight(
+            name='B',
+            shape=(input_shape[-1], self.mapping_size),
+            initializer=tf.random_normal_initializer(stddev=self.scale),
+            trainable=False
+        )
+        super(FourierFeatureMapping, self).build(input_shape)
+
+    def call(self, inputs):
+        x_proj = tf.matmul(inputs, self.B)
+        # Concatenate sine and cosine features
+        return tf.concat([tf.sin(x_proj), tf.cos(x_proj)], axis=-1)
 
 class PINN:
     """
-    Physics-Informed Neural Network (PINN) class.
-
-    This class implements a PINN model for solving partial differential equations.
-
-    Attributes:
-        model (tf.keras.Sequential): The neural network model.
-        optimizer (tf.keras.optimizers.Adam): The optimizer used for training.
-        eq (str): The name of the equation being solved.
+    Physics-Informed Neural Network (PINN) class with a Modified Fourier Network (MFN) architecture.
     """
 
     def __init__(self, input_shape: int = 2, output_shape: int = 1, layers: List[int] = [20, 20, 20],
                  activation: str = 'tanh', learning_rate: float = 0.01, eq: str = 'LidDrivenCavity') -> None:
-        """
-        Initializes a new PINN object.
-
-        Args:
-            input_shape (int): The shape of the input data. Defaults to 2.
-            output_shape (int): The shape of the output data. Defaults to 1.
-            layers (List[int]): A list of integers representing the number of units in each hidden layer. Defaults to [20, 20, 20].
-            activation (str): The activation function to use in the hidden layers. Defaults to 'tanh'.
-            learning_rate (float): The learning rate for the optimizer. Defaults to 0.01.
-            eq (str): The name of the equation being solved. Defaults to 'LidDrivenCavity'.
-        """
+        # Build the model with a Fourier feature mapping layer at the start.
         self.model: tf.keras.Sequential = self.create_model(input_shape, output_shape, layers, activation)
         self.model.summary()
         self.optimizer: tf.keras.optimizers.Adam = tf.keras.optimizers.Adam(
@@ -40,34 +49,20 @@ class PINN:
 
     def create_model(self, input_shape: int, output_shape: int, layers: List[int], activation: str) -> tf.keras.Sequential:
         """
-        Creates a TensorFlow Keras Sequential model.
-
-        Args:
-            input_shape (int): The shape of the input data.
-            output_shape (int): The shape of the output data.
-            layers (List[int]): A list of integers representing the number of units in each hidden layer.
-            activation (str): The activation function to use in the hidden layers.
-
-        Returns:
-            tf.keras.Sequential: A TensorFlow Keras Sequential model.
+        Creates an MFN model that begins with a Fourier feature mapping layer.
         """
         model = tf.keras.Sequential()
         model.add(tf.keras.layers.InputLayer(shape=(input_shape)))
+        # Add Fourier feature mapping layer (adjust mapping_size and scale as needed)
+        model.add(FourierFeatureMapping(mapping_size=64, scale=10.0))
+        # Follow with hidden Dense layers
         for units in layers:
             model.add(tf.keras.layers.Dense(units, activation=activation))
-        model.add(tf.keras.layers.Dense(output_shape))  # Output layer
+        # Final output layer
+        model.add(tf.keras.layers.Dense(output_shape))
         return model
 
     def learning_rate_schedule(self, initial_learning_rate: float) -> tf.keras.optimizers.schedules.ExponentialDecay:
-        """
-        Creates an exponential decay learning rate schedule.
-
-        Args:
-            initial_learning_rate (float): The initial learning rate.
-
-        Returns:
-            tf.keras.optimizers.schedules.ExponentialDecay: An exponential decay learning rate schedule.
-        """
         return tf.keras.optimizers.schedules.ExponentialDecay(
             initial_learning_rate=initial_learning_rate,
             decay_steps=1000,
@@ -75,7 +70,6 @@ class PINN:
         )
 
     def generate_batch(self, mesh, num_batches):
-        """Generate a random batch of points from the mesh."""
         total_points = len(mesh.x)
         batch_size = total_points // num_batches
         indices = np.random.choice(total_points, size=batch_size, replace=False)
@@ -85,13 +79,12 @@ class PINN:
                    tf.convert_to_tensor(mesh.y[indices], dtype=tf.float32))
         else:
             return (tf.convert_to_tensor(mesh.x[indices], dtype=tf.float32),
-                   tf.convert_to_tensor(mesh.y[indices], dtype=tf.float32),
-                   tf.convert_to_tensor(mesh.z[indices], dtype=tf.float32))
+                    tf.convert_to_tensor(mesh.y[indices], dtype=tf.float32),
+                    tf.convert_to_tensor(mesh.z[indices], dtype=tf.float32))
 
     def generate_batches(self, mesh, num_batches):
-        """Generate all batches from the mesh."""
         total_points = len(mesh.x)
-        indices = np.random.permutation(total_points)  # Shuffle all indices
+        indices = np.random.permutation(total_points)
         batch_size = total_points // num_batches
         
         batches = []
@@ -102,26 +95,18 @@ class PINN:
             
             if mesh.is2D:
                 batch = (tf.convert_to_tensor(mesh.x[batch_indices], dtype=tf.float32),
-                        tf.convert_to_tensor(mesh.y[batch_indices], dtype=tf.float32))
+                         tf.convert_to_tensor(mesh.y[batch_indices], dtype=tf.float32))
             else:
                 batch = (tf.convert_to_tensor(mesh.x[batch_indices], dtype=tf.float32),
-                        tf.convert_to_tensor(mesh.y[batch_indices], dtype=tf.float32),
-                        tf.convert_to_tensor(mesh.z[batch_indices], dtype=tf.float32))
+                         tf.convert_to_tensor(mesh.y[batch_indices], dtype=tf.float32),
+                         tf.convert_to_tensor(mesh.z[batch_indices], dtype=tf.float32))
             batches.append(batch)
         
         return batches
 
     @tf.function(jit_compile=True)
     def train_step(self, loss_function, batch_data) -> tf.Tensor:
-        """
-        Performs a single training step on a batch.
-
-        Args:
-            loss_function: A callable that computes the loss
-            batch_data: Tuple containing the batch data
-        """
         with tf.GradientTape() as tape:
-            # Pass batch_data as a parameter to the loss function context
             loss = loss_function(batch_data=batch_data)
         gradients = tape.gradient(loss, self.model.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
@@ -133,26 +118,9 @@ class PINN:
               domain_range: Optional[Tuple[Tuple[float, float], Tuple[float, float]]] = None,
               airfoil_coords: Optional[Tuple[np.ndarray, np.ndarray]] = None,
               output_dir: str = 'bc_plots') -> None:
-        """
-        Trains the PINN model using batch training.
-
-        Args:
-            loss_function: A callable that computes the loss
-            mesh: The mesh object containing the domain points
-            epochs: Number of epochs to train
-            num_batches: Number of batches to divide the data into
-            print_interval: Interval for printing progress
-            autosave_interval: Interval for saving the model
-            plot_loss: Whether to plot the loss during training
-            bc_plot_interval: Interval for plotting boundary condition errors
-            domain_range: Optional tuple of ((x_min, x_max), (y_min, y_max)) for domain boundaries
-            airfoil_coords: Optional tuple of (x_coords, y_coords) for airfoil or other interior boundary
-            output_dir: Directory where boundary condition plots will be saved
-        """
         loss_history = []
         epoch_history = []
 
-        # Initialize boundary condition visualization if needed
         if bc_plot_interval is not None:
             self.boundary_visualizer = BoundaryVisualization(output_dir=output_dir)
 
@@ -167,16 +135,13 @@ class PINN:
             plt.legend()
 
         for epoch in range(epochs):
-            # Generate all batches for this epoch
             batches = self.generate_batches(mesh, num_batches)
             epoch_loss = 0.0
             
-            # Train on each batch
             for batch_data in batches:
                 batch_loss = self.train_step(loss_function, batch_data)
                 epoch_loss += batch_loss
 
-            # Average loss over all batches
             epoch_loss = epoch_loss / num_batches
 
             if (epoch + 1) % print_interval == 0:
@@ -193,7 +158,6 @@ class PINN:
 
                 print(f"Epoch {epoch + 1}: Loss = {epoch_loss.numpy()}")
             
-            # Plot boundary condition errors if requested
             if self.boundary_visualizer is not None and bc_plot_interval is not None and (epoch + 1) % bc_plot_interval == 0:
                 self.boundary_visualizer.plot_boundary_conditions(
                     self, mesh, epoch + 1, domain_range, airfoil_coords
@@ -207,7 +171,6 @@ class PINN:
                     print(f"Error saving model: {e}")
                     raise
 
-        # Plot boundary condition error evolution at the end of training
         if self.boundary_visualizer is not None:
             self.boundary_visualizer.plot_error_evolution()
 
@@ -216,33 +179,12 @@ class PINN:
             plt.close()
 
     def predict(self, X: np.ndarray) -> np.ndarray:
-        """
-        Predicts the output for the given input.
-
-        Args:
-            X (np.ndarray): The input data.
-
-        Returns:
-            np.ndarray: The predicted output.
-        """
         return self.model.predict(X)
 
     def load(self, model_name: str) -> None:
-        """
-        Loads a trained model from the specified file.
-
-        Args:
-            model_name (str): The name of the model to load.
-
-        Raises:
-            FileNotFoundError: If the specified file does not exist.
-            RuntimeError: If there is an error loading the model.
-        """
         filepath: str = f'trainedModels/{model_name}.tf'
-
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"The specified file does not exist: {filepath}")
-
         try:
             self.model = tf.keras.models.load_model(filepath)
             print(f"Model successfully loaded from {filepath}")
