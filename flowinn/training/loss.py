@@ -170,22 +170,19 @@ class NavierStokesLoss:
 
     def compute_physics_loss(self, predictions, coords, tape):
         """Compute physics-based loss terms for flow equations."""
-        if not self.mesh.is2D:
-            # 3D case: [u, v, w, p]
-            velocities = predictions[:, :3]  # First 3 components are velocities
-            pressure = predictions[:, 3]     # Last component is pressure
-            # Pass all three coordinates
-            residuals = self._physics_loss.get_residuals(
-                velocities, pressure, coords, tape
-            )
-        else:
-            # 2D case: [u, v, p]
-            velocities = predictions[:, :2]  # First 2 components are velocities
-            pressure = predictions[:, 2]     # Last component is pressure
-            # Pass only x and y coordinates
-            residuals = self._physics_loss.get_residuals(
-                velocities, pressure, coords[:2], tape
-            )
+        is_3d = isinstance(self._physics_loss, NavierStokes3D)
+        n_vel_components = 3 if is_3d else 2
+        
+        # Split predictions into velocities and pressure
+        velocities = predictions[:, :n_vel_components]
+        pressure = predictions[:, n_vel_components]
+        
+        # Use all coordinates for 3D, only x,y for 2D
+        coords_to_use = coords if is_3d else coords[:2]
+        
+        residuals = self._physics_loss.get_residuals(
+            velocities, pressure, coords_to_use, tape
+        )
         
         # Compute loss for each residual
         loss = 0.0
