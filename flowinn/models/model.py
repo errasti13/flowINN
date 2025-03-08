@@ -38,7 +38,7 @@ class PINN:
     """
 
     def __init__(self, input_shape: int = 2, output_shape: int = 1, layers: List[int] = [20, 20, 20],
-                 activation: str = 'tanh', learning_rate: float = 0.01, eq: str = 'LidDrivenCavity') -> None:
+                 activation: str = 'gelu', learning_rate: float = 0.01, eq: str = None) -> None:
         # Build the model with a Fourier feature mapping layer at the start.
         self.model: tf.keras.Sequential = self.create_model(input_shape, output_shape, layers, activation)
         self.model.summary()
