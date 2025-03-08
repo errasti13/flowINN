@@ -3,21 +3,21 @@ from flowinn.physics.steady_3D import SteadyNavierStokes3D
 import tensorflow as tf
 
 class NavierStokesLoss:
-    def __init__(self, mesh, model, physics_model='NS2D', weights=[0.7, 0.3]) -> None:
+    def __init__(self, mesh, model, Re: float = 1000.0, physics_model='NS2D', weights=[0.7, 0.3]) -> None:
         self._mesh = mesh
         self._model = model
-        self._nu: float = 0.01
         
         # Initialize physics model based on type
         if physics_model == 'NS2D':
-            self._physics_loss = SteadyNavierStokes2D()
+            self._physics_loss = SteadyNavierStokes2D(Re)
         elif physics_model == 'NS3D':
-            self._physics_loss = SteadyNavierStokes3D()
+            self._physics_loss = SteadyNavierStokes3D(Re)
         else:
             raise ValueError(f"Unknown physics model: {physics_model}")
 
         self.physicsWeight = weights[0]
         self.boundaryWeight = weights[1]
+
 
     @property
     def mesh(self):

@@ -5,6 +5,15 @@ from .navier_stokes import NavierStokes
 class SteadyNavierStokes3D(NavierStokes):
     """3D Unsteady Navier-Stokes equations solver."""
 
+    def __init__(self, Re: float = 1000.0):
+        """
+        Initialize the solver.
+        
+        Args:
+            Re (float): Reynolds number
+        """
+        self.Re = Re
+
     def get_residuals(self, velocities: tf.Tensor, pressure: tf.Tensor, coords: list, tape) -> Tuple[tf.Tensor, ...]:
         """
         Calculate 3D Unsteady Navier-Stokes residuals.
@@ -39,9 +48,9 @@ class SteadyNavierStokes3D(NavierStokes):
 
         continuity = u_x + v_y + w_z
 
-        momentum_x = u * u_x + v * u_y + w * u_z + p_x - self.nu * (u_xx + u_yy + u_zz)
-        momentum_y = u * v_x + v * v_y + w * v_z + p_y - self.nu * (v_xx + v_yy + v_zz)
-        momentum_z = u * w_x + v * w_y + w * w_z + p_z - self.nu * (w_xx + w_yy + w_zz)
+        momentum_x = u * u_x + v * u_y + w * u_z + p_x - self.Re * (u_xx + u_yy + u_zz)
+        momentum_y = u * v_x + v * v_y + w * v_z + p_y - self.Re * (v_xx + v_yy + v_zz)
+        momentum_z = u * w_x + v * w_y + w * w_z + p_z - self.Re * (w_xx + w_yy + w_zz)
 
         continuity = tf.reshape(continuity, [-1])
         momentum_x = tf.reshape(momentum_x, [-1])
