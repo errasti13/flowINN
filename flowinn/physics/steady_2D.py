@@ -54,14 +54,14 @@ class SteadyNavierStokes2D(NavierStokes):
         momentum_x = (
             u * u_x + v * u_y +
             p_x -
-            1 / self.Re * (u_xx + u_yy)
+            1 / self.Re * (u_xx + u_yy)  # Corrected ν to 1/Re
         )
         
         # Momentum equation y: u∂v/∂x + v∂v/∂y = -1/ρ * ∂p/∂y + ν(∂²v/∂x² + ∂²v/∂y²)
         momentum_y = (
             u * v_x + v * v_y +
             p_y  -
-            self.Re * (v_xx + v_yy)
+            1 / self.Re * (v_xx + v_yy)  # Corrected ν to 1/Re
         )
 
 
