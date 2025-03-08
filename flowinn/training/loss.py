@@ -17,6 +17,14 @@ class NavierStokesLoss:
 
         self.physicsWeight = weights[0]
         self.boundaryWeight = weights[1]
+        
+        # ReLoBraLo parameters
+        self.physics_loss_history = []
+        self.boundary_loss_history = []
+        self.lookback_window = 50
+        self.alpha = 0.1  # Learning rate for weight updates
+        self.min_weight = 0.1
+        self.max_weight = 0.9
 
 
     @property
@@ -66,6 +74,23 @@ class NavierStokesLoss:
         if value <= 0:
             raise ValueError("nu must be positive")
         self._nu = float(value)
+
+    def update_weights(self):
+        """Update weights using ReLoBraLo algorithm"""
+        if len(self.physics_loss_history) < self.lookback_window:
+            return
+
+        # Get random lookback window
+        lookback = tf.random.uniform([], minval=1, maxval=min(self.lookback_window, len(self.physics_loss_history)), dtype=tf.int32)
+        
+        # Calculate relative loss changes
+        physics_change = (self.physics_loss_history[-1] / (tf.reduce_mean(self.physics_loss_history[-lookback:]) + 1e-10))
+        boundary_change = (self.boundary_loss_history[-1] / (tf.reduce_mean(self.boundary_loss_history[-lookback:]) + 1e-10))
+        
+        # Update weights based on relative changes
+        weight_update = self.alpha * (physics_change - boundary_change)
+        self.physicsWeight = tf.clip_by_value(self.physicsWeight - weight_update, self.min_weight, self.max_weight)
+        self.boundaryWeight = 1.0 - self.physicsWeight
 
     def loss_function(self, batch_data=None):
         """Compute combined physics and boundary condition losses"""
@@ -166,6 +191,18 @@ class NavierStokesLoss:
         if hasattr(self.mesh, 'periodicBoundaries'):
             periodic_loss = self.compute_periodic_loss()
             total_loss += self.boundaryWeight * periodic_loss
+
+        # Store losses for ReLoBraLo
+        self.physics_loss_history.append(float(physics_loss))
+        self.boundary_loss_history.append(float(boundary_loss))
+        
+        # Update weights using ReLoBraLo
+        self.update_weights()
+
+        # Trim history if too long
+        if len(self.physics_loss_history) > self.lookback_window * 2:
+            self.physics_loss_history = self.physics_loss_history[-self.lookback_window:]
+            self.boundary_loss_history = self.boundary_loss_history[-self.lookback_window:]
 
         return total_loss
 
