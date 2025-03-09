@@ -4,7 +4,7 @@ from flowinn.tests.FlowOverAirfoil import FlowOverAirfoil
 def main():
     # Define simulation parameters
     case_name = "naca0012"
-    x_range = (-2.0, 4.0)  # Domain length
+    x_range = (-4.0, 4.0)  # Domain length
     y_range = (-2.0, 2.0)  # Domain height
     angle_of_attack = 10.0  # Degrees
     
@@ -17,7 +17,7 @@ def main():
     nx = 200
     ny = 200
     n_boundary = 200
-    num_batches = 10
+    num_batches = 5
 
     trainedModel = False
     
@@ -29,8 +29,7 @@ def main():
         print("Generating mesh...")
         airfoil.generateMesh(Nx=nx, Ny=ny, 
                            NBoundary=n_boundary, 
-                           sampling_method='uniform')
-        airfoil.mesh.showMesh()
+                           sampling_method='random')
 
         # Train the model
         if trainedModel:

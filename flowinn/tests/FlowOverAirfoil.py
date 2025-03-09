@@ -28,8 +28,13 @@ class FlowOverAirfoil:
         self.logger = logging.getLogger(__name__)
         self.is2D = True
         self.problemTag = caseName
+
+        layerSizes = []
+        for i in range(6):
+            layerSizes.append(128)
+
         self.mesh = Mesh(self.is2D)
-        self.model = PINN(input_shape=(2,), output_shape=3, eq = self.problemTag, layers=[20,40,60,40,20])
+        self.model = PINN(input_shape=(2,), output_shape=3, eq = self.problemTag, layers=layerSizes)
 
         self.loss = None
         self.Plot = None
@@ -44,10 +49,43 @@ class FlowOverAirfoil:
 
         self.generate_airfoil_coords()
 
+        self.u_ref = 1.0 #Freestream velocity
+        self.P_inf = 101325 #Freestream pressure
+        self.rho = 1.225 #Freestream density
+        self.nu = 0.1 #Kinematic viscosity
+        
+        # Calculate velocity components
+        self.u_inf = float(self.u_ref*np.cos(np.radians(self.AoA)))
+        self.v_inf = float(self.u_ref*np.sin(np.radians(self.AoA)))
+
+        self.Re = (xRange[1] - xRange[0]) * self.u_ref / self.nu #Reynolds number
+
+        print(f"Reynolds number: {self.Re}")
+
+        self.L_ref = xRange[1] - xRange[0] #Reference length
+        self.normalize_data()
+
         # Initialize boundary condition objects
         self.inlet_bc = InletBC("inlet")
         self.outlet_bc = OutletBC("outlet")
         self.wall_bc = WallBC("wall")
+
+        return
+    
+    def normalize_data(self):
+        """
+        Normalize the airfoil coordinates and freestream velocity.
+        """
+        self.xAirfoil = (self.xAirfoil) / self.L_ref
+        self.yAirfoil = (self.yAirfoil) / self.L_ref
+
+        self.xRange = (self.xRange[0] / self.L_ref, self.xRange[1] / self.L_ref)
+        self.yRange = (self.yRange[0] / self.L_ref, self.yRange[1] / self.L_ref)
+
+        self.u_inf = self.u_inf / self.u_ref
+        self.v_inf = self.v_inf / self.u_ref
+
+        self.P_inf = self.P_inf / (self.rho * self.u_ref**2)
 
         return
     
@@ -98,7 +136,7 @@ class FlowOverAirfoil:
             
             x_outlet = np.full(NBoundary, self.xRange[1])
             y_outlet = np.linspace(self.yRange[0], self.yRange[1], NBoundary)
-
+            
             # Ensure airfoil coordinates are properly shaped
             x_airfoil = self.xAirfoil.flatten()
             y_airfoil = self.yAirfoil.flatten()
@@ -149,9 +187,6 @@ class FlowOverAirfoil:
 
     def _initialize_boundaries(self):
         """Initialize boundaries with proper BC system."""
-        # Calculate velocity components
-        u_inf = float(np.cos(np.radians(self.AoA)))
-        v_inf = float(np.sin(np.radians(self.AoA)))
         
         # Initialize exterior boundaries
         self.mesh.boundaries = {
@@ -159,8 +194,8 @@ class FlowOverAirfoil:
                 'x': None,
                 'y': None,
                 'conditions': {
-                    'u': {'value': u_inf},
-                    'v': {'value': v_inf},
+                    'u': {'value': self.u_inf},
+                    'v': {'value': self.v_inf},
                     'p': {'gradient': 0.0, 'direction': 'x'}
                 },
                 'bc_type': self.inlet_bc
@@ -179,8 +214,8 @@ class FlowOverAirfoil:
                 'x': None,
                 'y': None,
                 'conditions': {
-                    'u': {'value': u_inf},
-                    'v': {'value': v_inf},
+                    'u': {'value': self.u_inf},
+                    'v': {'value': self.v_inf},
                     'p': {'gradient': 0.0, 'direction': 'y'}
                 },
                 'bc_type': self.wall_bc
@@ -189,8 +224,8 @@ class FlowOverAirfoil:
                 'x': None,
                 'y': None,
                 'conditions': {
-                    'u': {'value': u_inf},
-                    'v': {'value': v_inf},
+                    'u': {'value': self.u_inf},
+                    'v': {'value': self.v_inf},
                     'p': {'gradient': 0.0, 'direction': 'y'}
                 },
                 'bc_type': self.wall_bc
@@ -229,7 +264,7 @@ class FlowOverAirfoil:
                 raise ValueError(f"Coordinates not set for interior boundary {name}")
 
     def getLossFunction(self):
-        self.loss = NavierStokesLoss(self.mesh, self.model)
+        self.loss = NavierStokesLoss(self.mesh, self.model, Re=self.Re)
     
     def train(self, epochs=10000, print_interval=100, autosaveInterval=10000, num_batches=10):
         self.getLossFunction()
@@ -239,7 +274,9 @@ class FlowOverAirfoil:
             epochs=epochs,
             print_interval=print_interval,
             autosave_interval=autosaveInterval,
-            num_batches=num_batches
+            num_batches=num_batches,
+            patience=1000,
+            min_delta=1e-4
         )
 
     def predict(self) -> None:
