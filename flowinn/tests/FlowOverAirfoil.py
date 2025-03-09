@@ -264,7 +264,7 @@ class FlowOverAirfoil:
                 raise ValueError(f"Coordinates not set for interior boundary {name}")
 
     def getLossFunction(self):
-        self.loss = NavierStokesLoss(self.mesh, self.model, Re=self.Re)
+        self.loss = NavierStokesLoss('steady', self.mesh, self.model, self.Re)
     
     def train(self, epochs=10000, print_interval=100, autosaveInterval=10000, num_batches=10):
         self.getLossFunction()
