@@ -117,9 +117,11 @@ class PINN:
               plot_loss: bool = False, bc_plot_interval: Optional[int] = None, 
               domain_range: Optional[Tuple[Tuple[float, float], Tuple[float, float]]] = None,
               airfoil_coords: Optional[Tuple[np.ndarray, np.ndarray]] = None,
-              output_dir: str = 'bc_plots') -> None:
+              output_dir: str = 'bc_plots', patience: int = 1000, min_delta: float = 1e-6) -> None:
         loss_history = []
         epoch_history = []
+        last_loss = float('inf')
+        patience_counter = 0
 
         if bc_plot_interval is not None:
             self.boundary_visualizer = BoundaryVisualization(output_dir=output_dir)
@@ -143,6 +145,17 @@ class PINN:
                 epoch_loss += batch_loss
 
             epoch_loss = epoch_loss / num_batches
+
+            # Early stopping check
+            if epoch_loss < last_loss - min_delta:
+                patience_counter = 0
+            else:
+                patience_counter += 1
+                if patience_counter >= patience:
+                    print(f"\nEarly stopping triggered after {epoch + 1} epochs")
+                    break
+            
+            last_loss = epoch_loss
 
             if (epoch + 1) % print_interval == 0:
                 loss_history.append(epoch_loss.numpy())
