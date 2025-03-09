@@ -1,4 +1,3 @@
-import numpy as np
 from flowinn.tests.FlowOverAirfoil import FlowOverAirfoil
 
 def main():
