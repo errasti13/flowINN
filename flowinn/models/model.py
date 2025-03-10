@@ -75,8 +75,13 @@ class PINN:
         indices = np.random.choice(total_points, size=batch_size, replace=False)
         
         if mesh.is2D:
-            return (tf.convert_to_tensor(mesh.x[indices], dtype=tf.float32),
-                   tf.convert_to_tensor(mesh.y[indices], dtype=tf.float32))
+            if hasattr(mesh, 't'):
+                return (tf.convert_to_tensor(mesh.x[indices], dtype=tf.float32),
+                        tf.convert_to_tensor(mesh.y[indices], dtype=tf.float32),
+                        tf.convert_to_tensor(mesh.t[indices], dtype=tf.float32))
+            else:
+                return (tf.convert_to_tensor(mesh.x[indices], dtype=tf.float32),
+                       tf.convert_to_tensor(mesh.y[indices], dtype=tf.float32))
         else:
             return (tf.convert_to_tensor(mesh.x[indices], dtype=tf.float32),
                     tf.convert_to_tensor(mesh.y[indices], dtype=tf.float32),
