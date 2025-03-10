@@ -1,4 +1,5 @@
 from flowinn.training.steady_loss import SteadyNavierStokesLoss
+from flowinn.training.unsteady_loss import UnsteadyNavierStokesLoss
 
 class NavierStokesLoss:
     def __init__(self, loss_type = 'steady', mesh=None, model=None, **kwargs):
@@ -13,7 +14,7 @@ class NavierStokesLoss:
         if loss_type.lower() == 'steady':
             return SteadyNavierStokesLoss(mesh, model, **kwargs)
         elif loss_type.lower() == 'unsteady':
-            raise NotImplementedError("Unsteady Navier-Stokes loss not yet implemented")
+            return UnsteadyNavierStokesLoss(mesh, model, **kwargs)
         else:
             raise ValueError(f"Unknown loss type: {loss_type}")
 
