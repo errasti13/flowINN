@@ -24,6 +24,7 @@ class Mesh:
         self._x: Optional[np.ndarray] = None
         self._y: Optional[np.ndarray] = None
         self._z: Optional[np.ndarray] = None
+        self._z: Optional[np.ndarray] = None
         self._solutions: Dict[str, np.ndarray] = {}
         self._boundaries: Dict[str, Dict[str, np.ndarray]] = {}
         self._interiorBoundaries: Dict[str, Dict[str, np.ndarray]] = {}
