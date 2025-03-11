@@ -24,11 +24,12 @@ class Mesh:
         self._x: Optional[np.ndarray] = None
         self._y: Optional[np.ndarray] = None
         self._z: Optional[np.ndarray] = None
-        self._z: Optional[np.ndarray] = None
+        self._t: Optional[np.ndarray] = None
         self._solutions: Dict[str, np.ndarray] = {}
         self._boundaries: Dict[str, Dict[str, np.ndarray]] = {}
         self._interiorBoundaries: Dict[str, Dict[str, np.ndarray]] = {}
         self._periodicBoundaries: Dict[str, Dict[str, np.ndarray]] = {}
+        self._initialConditions: Dict[str, np.ndarray] = {}
         self._is2D: bool = is2D
         self.meshio: Optional[MeshIO] = None
 
@@ -104,6 +105,28 @@ class Mesh:
         if not isinstance(value, np.ndarray):
             raise TypeError("z must be a numpy array")
         self._z = value
+
+    @property
+    def t(self) -> Optional[np.ndarray]:
+        """
+        Returns the time values of the mesh points.
+        """
+        return self._t
+    
+    @t.setter
+    def t(self, value: np.ndarray) -> None:
+        """
+        Sets the time values of the mesh points.
+
+        Args:
+            value (np.ndarray): A numpy array containing the time values.
+
+        Raises:
+            TypeError: If value is not a numpy array.
+        """
+        if not isinstance(value, np.ndarray):
+            raise TypeError("t must be a numpy array")
+        self._t = value
 
     @property
     def solutions(self) -> Dict[str, np.ndarray]:
@@ -192,6 +215,28 @@ class Mesh:
         if not isinstance(value, dict):
             raise TypeError("interiorBoundaries must be a dictionary")
         self._periodicBoundaries = value
+    
+    @property
+    def initialConditions(self) -> Dict[str, np.ndarray]:
+        """
+        Returns the initial conditions dictionary.
+        """
+        return self._initialConditions
+    
+    @initialConditions.setter
+    def initialConditions(self, value: Dict[str, np.ndarray]) -> None:
+        """
+        Sets the initial conditions dictionary.
+
+        Args:
+            value (dict): A dictionary containing initial condition data.
+
+        Raises:
+            TypeError: If value is not a dictionary.
+        """
+        if not isinstance(value, dict):
+            raise TypeError("initialConditions must be a dictionary")
+        self._initialConditions = value
 
     @property
     def is2D(self) -> bool:
@@ -277,6 +322,17 @@ class Mesh:
             Sampler._sampleUniformlyWithinBoundary(self, x_boundary, y_boundary, z_boundary, Nx, Ny, Nz)
         else:
             raise ValueError(f"Unsupported sampling method: {sampling_method}")
+        
+    def generate_time_mesh(self, Nt: int = 100, t_range: Tuple[float, float] = (0.0, 1.0)) -> None:
+        """
+        Generates a time mesh.
+
+        Args:
+            Nt (int): Number of time points. Defaults to 100.
+            t_range (Tuple[float, float]): Time range. Defaults to (0.0, 1.0).
+        """
+        self._t = np.linspace(t_range[0], t_range[1], Nt)
+        return
 
 
     def setBoundary(self, boundary_name: str, xBc: np.ndarray, yBc: np.ndarray, interior: bool = False,
