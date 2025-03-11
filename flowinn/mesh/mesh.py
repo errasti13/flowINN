@@ -323,7 +323,7 @@ class Mesh:
         else:
             raise ValueError(f"Unsupported sampling method: {sampling_method}")
         
-    def generate_time_mesh(self, Nt: int = 100, t_range: Tuple[float, float] = (0.0, 1.0)) -> None:
+    def generate_time_discretization(self, Nt: int = 100, t_range: Tuple[float, float] = (0.0, 1.0)) -> None:
         """
         Generates a time mesh.
 
@@ -380,4 +380,22 @@ class Mesh:
         """
         self._create_meshio()
         self.meshio.write_tecplot(filename)
+
+    def print_mesh_info(self) -> None:
+        """
+        Prints information about the mesh.
+        """
+        print("Mesh information:")
+        print(f'Number of points in x-direction: {len(self.x)}')
+        print(f'Min and max x-coordinates: {np.min(self.x)} and {np.max(self.x)}')
+        print(f'Number of points in y-direction: {len(self.y)}')
+        print(f'Min and max y-coordinates: {np.min(self.y)} and {np.max(self.y)}')
+        if self.is2D:
+            pass
+        else:
+            print(f'Number of points in z-direction: {len(self.z)}')
+            print(f'Min and max z-coordinates: {np.min(self.z)} and {np.max(self.z)}')
+        if self.t is not None:
+            print(f'Number of time points: {len(self.t)}')
+            print(f'Min and max time values: {np.min(self.t)} and {np.max(self.t)}')
 
