@@ -301,7 +301,7 @@ class MinimalChannelFlow:
                     )
 
     def getLossFunction(self):
-        self.loss = NavierStokesLoss(self.mesh, self.model)
+        self.loss = NavierStokesLoss('steady', self.mesh, self.model)
     
     def train(self, epochs=10000, print_interval=100, autosaveInterval=10000, num_batches=10):
         """Train the model with batch support."""
