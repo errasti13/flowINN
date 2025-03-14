@@ -69,35 +69,46 @@ class PINN:
             decay_rate=0.9
         )
 
-    def generate_batches(self, mesh, num_batches):
-        """Generate batches for training with proper handling of spatial and temporal dimensions."""
+    def generate_batches(self, mesh, num_batches, time_window_size=3):
+        """Generate batches for training using a sliding time window approach."""
         
-        # For unsteady problems, create a space-time grid
+        # For unsteady problems, create a space-time grid with multiple time windows
         if mesh.is2D and hasattr(mesh, 't'):
-            # Get dimensions
             spatial_points = len(mesh.x)  # Nx*Ny points
             time_points = len(mesh.t)     # Nt points
-            total_points = spatial_points * time_points  # Total grid points
-            
+            total_points = spatial_points * time_points
+
             # Create full space-time grid
             x_grid = np.repeat(mesh.x, time_points)
             y_grid = np.repeat(mesh.y, time_points)
             t_grid = np.tile(mesh.t, spatial_points)
-            
-            # Shuffle all points
-            indices = np.random.permutation(total_points)
+
+            # Shuffle all indices while keeping time window structure
+            indices = np.random.permutation(total_points - time_window_size + 1)
             batch_size = total_points // num_batches
             
             batches = []
             for i in range(num_batches):
                 start_idx = i * batch_size
-                end_idx = start_idx + batch_size if i < num_batches - 1 else total_points
+                end_idx = min(start_idx + batch_size, total_points - time_window_size)
                 batch_indices = indices[start_idx:end_idx]
+
+                # Ensure indices are within bounds
+                batch_indices = batch_indices[batch_indices < total_points]
                 
+                # Collect all time-windowed indices
+                time_window_indices = []
+                for idx in batch_indices:
+                    for t_offset in range(time_window_size):
+                        new_idx = idx + t_offset * spatial_points
+                        if new_idx < total_points:
+                            time_window_indices.append(new_idx)
+                
+                # Convert batch data to tensors
                 batch = (
-                    tf.convert_to_tensor(x_grid[batch_indices], dtype=tf.float32),
-                    tf.convert_to_tensor(y_grid[batch_indices], dtype=tf.float32),
-                    tf.convert_to_tensor(t_grid[batch_indices], dtype=tf.float32)
+                    tf.convert_to_tensor(x_grid[time_window_indices], dtype=tf.float32),
+                    tf.convert_to_tensor(y_grid[time_window_indices], dtype=tf.float32),
+                    tf.convert_to_tensor(t_grid[time_window_indices], dtype=tf.float32)
                 )
                 batches.append(batch)
         
@@ -110,9 +121,9 @@ class PINN:
             batches = []
             for i in range(num_batches):
                 start_idx = i * batch_size
-                end_idx = start_idx + batch_size if i < num_batches - 1 else total_points
+                end_idx = min(start_idx + batch_size, total_points)
                 batch_indices = indices[start_idx:end_idx]
-                
+
                 if mesh.is2D:
                     batch = (
                         tf.convert_to_tensor(mesh.x[batch_indices], dtype=tf.float32),
@@ -127,6 +138,8 @@ class PINN:
                 batches.append(batch)
         
         return batches
+
+
 
     @tf.function(jit_compile=True)
     def train_step(self, loss_function, batch_data) -> tf.Tensor:
