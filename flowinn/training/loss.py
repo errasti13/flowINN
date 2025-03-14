@@ -18,9 +18,9 @@ class NavierStokesLoss:
         else:
             raise ValueError(f"Unknown loss type: {loss_type}")
 
-    def __new__(cls, mesh=None, model=None, **kwargs):
+    def __new__(cls, loss_type='steady', mesh=None, model=None, **kwargs):
         """Override new to return the actual loss object"""
         if mesh is not None and model is not None:
-            return cls.create('steady', mesh, model, **kwargs)
+            return cls.create(loss_type, mesh, model, **kwargs)
         return super().__new__(cls)
 
