@@ -69,55 +69,6 @@ class PINN:
             decay_rate=0.9
         )
 
-    def generate_batch(self, mesh, num_batches):
-        """Generate training batches for unsteady simulations."""
-        
-        # For unsteady simulations, we need to handle the time dimension differently
-        if hasattr(mesh, 't'):
-            # Get dimensions
-            nx = len(mesh.x.flatten())
-            ny = len(mesh.y.flatten())
-            nt = len(mesh.t.flatten())
-            
-            # Calculate total number of space-time points
-            total_points = nx * ny * nt
-            batch_size = total_points // num_batches
-            
-            # Create full space-time grid if not already cached
-            if not hasattr(self, 'space_time_grid'):
-                # Create meshgrid of all space-time points
-                x_grid = np.tile(mesh.x.flatten(), nt)
-                y_grid = np.tile(mesh.y.flatten(), nt)
-                
-                # For each time step, repeat all spatial points
-                t_indices = np.repeat(np.arange(nt), nx * ny)
-                t_grid = mesh.t.flatten()[t_indices]
-                
-                # Cache the grid
-                self.space_time_grid = np.column_stack((x_grid, y_grid, t_grid))
-            
-            # Sample randomly from the space-time grid
-            indices = np.random.choice(total_points, size=batch_size, replace=False)
-            batch_points = self.space_time_grid[indices]
-            
-            return (tf.convert_to_tensor(batch_points[:, 0], dtype=tf.float32),
-                    tf.convert_to_tensor(batch_points[:, 1], dtype=tf.float32),
-                    tf.convert_to_tensor(batch_points[:, 2], dtype=tf.float32))
-        
-        # For steady simulations, use the original approach
-        else:
-            total_points = len(mesh.x)
-            batch_size = total_points // num_batches
-            indices = np.random.choice(total_points, size=batch_size, replace=False)
-            
-            if mesh.is2D:
-                return (tf.convert_to_tensor(mesh.x[indices], dtype=tf.float32),
-                    tf.convert_to_tensor(mesh.y[indices], dtype=tf.float32))
-            else:
-                return (tf.convert_to_tensor(mesh.x[indices], dtype=tf.float32),
-                        tf.convert_to_tensor(mesh.y[indices], dtype=tf.float32),
-                        tf.convert_to_tensor(mesh.z[indices], dtype=tf.float32))
-
     def generate_batches(self, mesh, num_batches):
         """Generate batches for training with proper handling of spatial and temporal dimensions."""
         
