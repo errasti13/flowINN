@@ -32,6 +32,7 @@ class Mesh:
         self._initialConditions: Dict[str, np.ndarray] = {}
         self._is2D: bool = is2D
         self.meshio: Optional[MeshIO] = None
+        self.is_unsteady = False
 
     def _create_meshio(self) -> None:
         """
@@ -333,6 +334,7 @@ class Mesh:
         """
         if t_range is None:
             self._t = None
+            self.is_unsteady = False
             return
             
         self._t = np.linspace(t_range[0], t_range[1], Nt)
