@@ -331,7 +331,12 @@ class Mesh:
             Nt (int): Number of time points. Defaults to 100.
             t_range (Tuple[float, float]): Time range. Defaults to (0.0, 1.0).
         """
+        if t_range is None:
+            self._t = None
+            return
+            
         self._t = np.linspace(t_range[0], t_range[1], Nt)
+        self.is_unsteady = True
         return
 
 

@@ -72,49 +72,48 @@ class PINN:
     def generate_batches(self, mesh, num_batches, time_window_size=3):
         """Generate batches for training using a sliding time window approach."""
         
-        # Check if this is an unsteady problem with valid time data
-        is_unsteady = mesh.is2D and hasattr(mesh, 't') and mesh.t is not None
+        # Check if this is an unsteady problem
+        is_unsteady = hasattr(mesh, 'is_unsteady') and mesh.is_unsteady
         
-        # For unsteady problems with time data
+        # For unsteady problems
         if is_unsteady:
-            # Get dimensions
-            nx = len(mesh.x)
-            nt = len(mesh.t)
-            
-            # Create space-time points
-            x = mesh.x.reshape(-1, 1)
-            y = mesh.y.reshape(-1, 1)
-            
-            # Calculate batch size for spatial points
-            spatial_points_per_batch = nx // num_batches
+            spatial_points = len(mesh.x)
+            time_points = len(mesh.t)
+            points_per_batch = spatial_points // num_batches
             
             batches = []
             for i in range(num_batches):
-                # Select spatial points for this batch
-                start_idx = i * spatial_points_per_batch
-                end_idx = start_idx + spatial_points_per_batch
+                start_idx = i * points_per_batch
+                end_idx = start_idx + points_per_batch
                 
-                # Get spatial coordinates for this batch
-                x_batch = x[start_idx:end_idx]
-                y_batch = y[start_idx:end_idx]
+                # Get spatial points for this batch
+                x_batch = mesh.x[start_idx:end_idx]
+                y_batch = mesh.y[start_idx:end_idx]
                 
-                # Create time windows for each spatial point
-                x_time = np.repeat(x_batch, time_window_size, axis=0)
-                y_time = np.repeat(y_batch, time_window_size, axis=0)
+                # Select random time windows for each spatial point
+                t_starts = np.random.randint(0, time_points - time_window_size + 1, size=len(x_batch))
                 
-                # Create sliding time windows
-                t_indices = np.random.randint(0, nt - time_window_size + 1, size=len(x_batch))
-                t_windows = np.array([mesh.t[i:i + time_window_size] for i in t_indices])
-                t_windows = t_windows.reshape(-1, 1)
+                # Create time windows
+                all_x = []
+                all_y = []
+                all_t = []
                 
-                # Stack coordinates
+                for j, t_start in enumerate(t_starts):
+                    for t_idx in range(t_start, t_start + time_window_size):
+                        all_x.append(x_batch[j])
+                        all_y.append(y_batch[j])
+                        all_t.append(mesh.t[t_idx])
+                
+                # Convert to tensors
                 batch = (
-                    tf.convert_to_tensor(x_time, dtype=tf.float32),
-                    tf.convert_to_tensor(y_time, dtype=tf.float32),
-                    tf.convert_to_tensor(t_windows, dtype=tf.float32)
+                    tf.convert_to_tensor(np.array(all_x), dtype=tf.float32),
+                    tf.convert_to_tensor(np.array(all_y), dtype=tf.float32),
+                    tf.convert_to_tensor(np.array(all_t), dtype=tf.float32)
                 )
                 batches.append(batch)
-        
+                
+            return batches
+            
         # For steady problems
         else:
             total_points = len(mesh.x)
