@@ -73,15 +73,20 @@ class PINN:
         """Generate batches for training using a sliding time window approach."""
         batches = []
 
+        # Flatten arrays for proper indexing
+        x_flat = mesh.x.ravel()
+        y_flat = mesh.y.ravel()
+        z_flat = None if mesh.is2D else mesh.z.ravel()
+
         if mesh.is_unsteady:
-            spatial_points = len(mesh.x)
+            spatial_points = len(x_flat)
             time_points = len(mesh.t)
             total_points = spatial_points * time_points
             points_per_batch = total_points // num_batches
 
             points_per_dim = int(np.cbrt(points_per_batch))
 
-            for batch_idx in range(num_batches):
+            for _ in range(num_batches):
                 x_indices = np.random.choice(spatial_points, size=points_per_dim, replace=True)
                 y_indices = np.random.choice(spatial_points, size=points_per_dim, replace=True)
                 t_indices = np.random.choice(time_points, size=points_per_dim, replace=True)
@@ -90,9 +95,9 @@ class PINN:
                 for x in x_indices:
                     for y in y_indices:
                         for t in t_indices:
-                            x_val = float(mesh.x[x])
-                            y_val = float(mesh.y[y]) 
-                            t_val = float(mesh.t[t])
+                            x_val = x_flat[x].astype(np.float32)
+                            y_val = y_flat[y].astype(np.float32)
+                            t_val = mesh.t[t].astype(np.float32)
                             batch_coords.append([x_val, y_val, t_val])
 
                 batch_coords = np.array(batch_coords, dtype=np.float32)
@@ -100,12 +105,12 @@ class PINN:
                 batches.append(tf.convert_to_tensor(batch_coords))
 
         else:
-            total_points = len(mesh.x)
+            total_points = len(x_flat)
             points_per_batch = total_points // num_batches
             
             points_per_dim = int(np.sqrt(points_per_batch) if mesh.is2D else np.cbrt(points_per_batch))
 
-            for batch_idx in range(num_batches):
+            for _ in range(num_batches):
                 batch_coords = []
                 if mesh.is2D:
                     x_indices = np.random.choice(total_points, size=points_per_dim, replace=True)
@@ -113,8 +118,8 @@ class PINN:
                     
                     for x in x_indices:
                         for y in y_indices:
-                            x_val = float(mesh.x[x])
-                            y_val = float(mesh.y[y])
+                            x_val = x_flat[x].astype(np.float32)
+                            y_val = y_flat[y].astype(np.float32)
                             batch_coords.append([x_val, y_val])
                 else:
                     x_indices = np.random.choice(total_points, size=points_per_dim, replace=True)
@@ -124,9 +129,9 @@ class PINN:
                     for x in x_indices:
                         for y in y_indices:
                             for z in z_indices:
-                                x_val = float(mesh.x[x])
-                                y_val = float(mesh.y[y])
-                                z_val = float(mesh.z[z])
+                                x_val = x_flat[x].astype(np.float32)
+                                y_val = y_flat[y].astype(np.float32)
+                                z_val = z_flat[z].astype(np.float32)
                                 batch_coords.append([x_val, y_val, z_val])
 
                 batch_coords = np.array(batch_coords, dtype=np.float32)
