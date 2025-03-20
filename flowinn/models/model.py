@@ -84,8 +84,6 @@ class PINN:
             points_per_dim = int(np.cbrt(points_per_batch))
 
             for batch_idx in range(num_batches):
-                print(f"[DEBUG] Generating batch {batch_idx+1}/{num_batches}")
-
                 # Sample indices from each dimension
                 x_indices = np.random.choice(spatial_points, size=points_per_dim, replace=True)
                 y_indices = np.random.choice(spatial_points, size=points_per_dim, replace=True)
