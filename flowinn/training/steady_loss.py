@@ -19,7 +19,6 @@ class SteadyNavierStokesLoss(NavierStokesBaseLoss):
     def physics_loss(self):
         return self._physics_loss
 
-    @tf.function
     def loss_function(self, batch_data=None):
         """Compute combined physics and boundary condition losses"""
         # Get coordinates based on dimension
@@ -35,7 +34,7 @@ class SteadyNavierStokesLoss(NavierStokesBaseLoss):
                     for coord in ['x', 'y']
                 ]
         else:
-            # Split batch_data into individual coordinate tensors
+            # Fix: Use tf.split instead of Python iteration over tensor
             coords = tf.split(batch_data, num_or_size_splits=batch_data.shape[-1], axis=-1)
 
         total_loss = 0.0
@@ -140,22 +139,29 @@ class SteadyNavierStokesLoss(NavierStokesBaseLoss):
         is_3d = isinstance(self._physics_loss, SteadyNavierStokes3D)
         n_vel_components = 3 if is_3d else 2
         
+        # Ensure predictions and coords are proper tensors
+        predictions = tf.convert_to_tensor(predictions, dtype=tf.float32)
+        coords = [tf.convert_to_tensor(c, dtype=tf.float32) for c in coords]
+        
         # Split predictions into velocities and pressure
-        velocities = predictions[:, :n_vel_components]
-        pressure = predictions[:, n_vel_components]
+        velocities = tf.reshape(predictions[:, :n_vel_components], [-1, n_vel_components])
+        pressure = tf.reshape(predictions[:, n_vel_components], [-1])
         
         # Use all coordinates for 3D, only x,y for 2D
         coords_to_use = coords if is_3d else coords[:2]
         
-        residuals = self._physics_loss.get_residuals(
-            velocities, pressure, coords_to_use, tape
-        )
+        # Watch tensors
+        with tape.stop_recording():
+            residuals = self._physics_loss.get_residuals(
+                velocities, pressure, coords_to_use, tape
+            )
         
         # Compute loss for each residual
         loss = 0.0
         for residual in residuals:
-            residual = tf.reshape(residual, [-1])
-            loss += tf.reduce_mean(tf.square(residual))
+            if residual is not None:  # Add null check
+                residual = tf.reshape(residual, [-1])
+                loss += tf.reduce_mean(tf.square(residual))
             
         return loss
 
