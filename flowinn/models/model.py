@@ -110,21 +110,36 @@ class PINN:
 
         else:
             total_points = len(mesh.x)
-            indices = np.random.permutation(total_points)
-            batch_size = total_points // num_batches
+            points_per_batch = total_points // num_batches
+            
+            # Compute square root for 2D or cubic root for 3D to get sample points per dimension
+            points_per_dim = int(np.sqrt(points_per_batch) if hasattr(mesh, 'is2D') and mesh.is2D 
+                               else np.cbrt(points_per_batch))
 
-            for i in range(num_batches):
-                start_idx = i * batch_size
-                end_idx = min(start_idx + batch_size, total_points)
-                batch_indices = indices[start_idx:end_idx]
+            for batch_idx in range(num_batches):
+                batch_coords = []
+                x_indices = np.random.choice(total_points, size=points_per_dim, replace=True)
+                y_indices = np.random.choice(total_points, size=points_per_dim, replace=True)
 
                 if hasattr(mesh, 'is2D') and mesh.is2D:
-                    batch_coords = np.column_stack((mesh.x[batch_indices], mesh.y[batch_indices]))
+                    for x in x_indices:
+                        for y in y_indices:
+                            x_val, y_val = mesh.x[x][0], mesh.y[y][0]
+                            batch_coords.append([x_val, y_val])
                 else:
-                    batch_coords = np.column_stack((mesh.x[batch_indices], mesh.y[batch_indices], mesh.z[batch_indices]))
+                    z_indices = np.random.choice(total_points, size=points_per_dim, replace=True)
+                    for x in x_indices:
+                        for y in y_indices:
+                            for z in z_indices:
+                                x_val, y_val, z_val = mesh.x[x][0], mesh.y[y][0], mesh.z[z][0]
+                                batch_coords.append([x_val, y_val, z_val])
+
+                # Convert to NumPy array and trim excess points
+                batch_coords = np.array(batch_coords, dtype=np.float32)
+                batch_coords = batch_coords[:points_per_batch]
 
                 # Convert to tensor
-                batch = tf.convert_to_tensor(batch_coords, dtype=tf.float32)
+                batch = tf.convert_to_tensor(batch_coords)
                 batches.append(batch)
 
         return batches

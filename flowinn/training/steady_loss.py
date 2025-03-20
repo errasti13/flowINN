@@ -19,6 +19,7 @@ class SteadyNavierStokesLoss(NavierStokesBaseLoss):
     def physics_loss(self):
         return self._physics_loss
 
+    @tf.function
     def loss_function(self, batch_data=None):
         """Compute combined physics and boundary condition losses"""
         # Get coordinates based on dimension
@@ -34,7 +35,8 @@ class SteadyNavierStokesLoss(NavierStokesBaseLoss):
                     for coord in ['x', 'y']
                 ]
         else:
-            coords = [tf.reshape(x, [-1, 1]) for x in batch_data]
+            # Split batch_data into individual coordinate tensors
+            coords = tf.split(batch_data, num_or_size_splits=batch_data.shape[-1], axis=-1)
 
         total_loss = 0.0
 
