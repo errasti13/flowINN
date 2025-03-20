@@ -167,7 +167,7 @@ class UnsteadyNavierStokesLoss(NavierStokesBaseLoss):
 
                 # Apply initial condition and compute loss
                 initial_loss += tf.reduce_mean(tf.square(velocities[0] - initial_data['conditions']['u']['value']))
-                initial_loss += tf.reduce_mean(tf.square(pressure[1] - initial_data['conditions']['v']['value']))
+                initial_loss += tf.reduce_mean(tf.square(velocities[1] - initial_data['conditions']['v']['value']))
                 if initial_data['conditions']['p'] is not None:
                     initial_loss += tf.reduce_mean(tf.square(pressure - initial_data['conditions']['p']['value']))
 
