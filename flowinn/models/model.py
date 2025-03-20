@@ -87,21 +87,29 @@ class PINN:
             points_per_dim = int(np.cbrt(points_per_batch))
 
             for _ in range(num_batches):
+                # Sample indices in a vectorized way
                 x_indices = np.random.choice(spatial_points, size=points_per_dim, replace=True)
                 y_indices = np.random.choice(spatial_points, size=points_per_dim, replace=True)
                 t_indices = np.random.choice(time_points, size=points_per_dim, replace=True)
-
-                batch_coords = []
-                for x in x_indices:
-                    for y in y_indices:
-                        for t in t_indices:
-                            x_val = x_flat[x].astype(np.float32)
-                            y_val = y_flat[y].astype(np.float32)
-                            t_val = mesh.t[t].astype(np.float32)
-                            batch_coords.append([x_val, y_val, t_val])
-
-                batch_coords = np.array(batch_coords, dtype=np.float32)
+                
+                # Create meshgrid of all combinations
+                xx, yy, tt = np.meshgrid(x_indices, y_indices, t_indices)
+                
+                # Flatten and stack to get all combinations
+                all_indices = np.stack([xx.flatten(), yy.flatten(), tt.flatten()], axis=1)
+                
+                # Map indices to actual coordinate values
+                x_coords = x_flat[all_indices[:, 0]].astype(np.float32)
+                y_coords = y_flat[all_indices[:, 1]].astype(np.float32)
+                t_coords = mesh.t[all_indices[:, 2]].astype(np.float32)
+                
+                # Stack to create final coordinates array
+                batch_coords = np.stack([x_coords, y_coords, t_coords], axis=1)
+                
+                # Limit to points_per_batch
                 batch_coords = batch_coords[:points_per_batch]
+                
+                # Convert to tensor and add to batches
                 batches.append(tf.convert_to_tensor(batch_coords))
 
         else:
@@ -111,28 +119,45 @@ class PINN:
             points_per_dim = int(np.sqrt(points_per_batch) if mesh.is2D else np.cbrt(points_per_batch))
 
             for _ in range(num_batches):
-                batch_coords = []
                 if mesh.is2D:
+                    # Sample indices for 2D case
                     x_indices = np.random.choice(total_points, size=points_per_dim, replace=True)
                     y_indices = np.random.choice(total_points, size=points_per_dim, replace=True)
                     
-                    for x in x_indices:
-                        for y in y_indices:
-                            x_val = x_flat[x].astype(np.float32)
-                            y_val = y_flat[y].astype(np.float32)
-                            batch_coords.append([x_val, y_val])
+                    # Create meshgrid of all combinations
+                    xx, yy = np.meshgrid(x_indices, y_indices)
+                    
+                    # Flatten and stack
+                    all_indices = np.stack([xx.flatten(), yy.flatten()], axis=1)
+                    
+                    # Map indices to actual coordinate values
+                    x_coords = x_flat[all_indices[:, 0]].astype(np.float32)
+                    y_coords = y_flat[all_indices[:, 1]].astype(np.float32)
+                    
+                    # Stack to create final coordinates array
+                    batch_coords = np.stack([x_coords, y_coords], axis=1)
                 else:
+                    # Sample indices for 3D case
                     x_indices = np.random.choice(total_points, size=points_per_dim, replace=True)
                     y_indices = np.random.choice(total_points, size=points_per_dim, replace=True)
                     z_indices = np.random.choice(total_points, size=points_per_dim, replace=True)
                     
-                    for x in x_indices:
-                        for y in y_indices:
-                            for z in z_indices:
-                                x_val = x_flat[x].astype(np.float32)
-                                y_val = y_flat[y].astype(np.float32)
-                                z_val = z_flat[z].astype(np.float32)
-                                batch_coords.append([x_val, y_val, z_val])
+                    # Create meshgrid of all combinations
+                    xx, yy, zz = np.meshgrid(x_indices, y_indices, z_indices)
+                    
+                    # Flatten and stack
+                    all_indices = np.stack([xx.flatten(), yy.flatten(), zz.flatten()], axis=1)
+                    
+                    # Map indices to actual coordinate values
+                    x_coords = x_flat[all_indices[:, 0]].astype(np.float32)
+                    y_coords = y_flat[all_indices[:, 1]].astype(np.float32)
+                    z_coords = z_flat[all_indices[:, 2]].astype(np.float32)
+                    
+                    # Stack to create final coordinates array
+                    batch_coords = np.stack([x_coords, y_coords, z_coords], axis=1)
+                
+                # Limit to points_per_batch if needed
+                batch_coords = batch_coords[:points_per_batch]
 
                 batch_coords = np.array(batch_coords, dtype=np.float32)
                 batch_coords = batch_coords[:points_per_batch]
