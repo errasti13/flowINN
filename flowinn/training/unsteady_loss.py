@@ -23,9 +23,10 @@ class UnsteadyNavierStokesLoss(NavierStokesBaseLoss):
                 tf.reshape(tf.convert_to_tensor(getattr(self.mesh, coord), dtype=tf.float32), [-1, 1])
                 for coord in ['x', 'y', 't']
             ]
-            print(len(coords))
         else:
-            coords = [tf.reshape(x, [-1, 1]) for x in batch_data]
+            # Split batch_data into individual coordinate tensors
+            x, y, t = tf.split(batch_data, num_or_size_splits=3, axis=-1)
+            coords = [x, y, t]
 
         total_loss = 0.0
 
@@ -50,11 +51,6 @@ class UnsteadyNavierStokesLoss(NavierStokesBaseLoss):
                     for coord in ['x', 'y', 't'] if coord in boundary_data
                 ]
 
-                bc_coords = [
-                    tf.reshape(tf.convert_to_tensor(boundary_data[coord], dtype=tf.float32), [-1, 1])
-                    for coord in ['x', 'y', 't'] if coord in boundary_data
-                ]    
-                
                 bc_type = boundary_data['bc_type']
                 conditions = boundary_data['conditions']
 
@@ -162,14 +158,21 @@ class UnsteadyNavierStokesLoss(NavierStokesBaseLoss):
                 predictions = self.model.model(input_tensor)
                 
                 # Split predictions into velocities and pressure
-                velocities = predictions[:, :-1]
-                pressure = predictions[:, -1]
-
+                velocities = predictions[:, :-1]  # All velocity components
+                pressure = predictions[:, -1]     # Pressure component
+                
                 # Apply initial condition and compute loss
-                initial_loss += tf.reduce_mean(tf.square(velocities[0] - initial_data['conditions']['u']['value']))
-                initial_loss += tf.reduce_mean(tf.square(velocities[1] - initial_data['conditions']['v']['value']))
-                if initial_data['conditions']['p'] is not None:
-                    initial_loss += tf.reduce_mean(tf.square(pressure - initial_data['conditions']['p']['value']))
+                if 'u' in initial_data['conditions']:
+                    u_value = initial_data['conditions']['u']['value']
+                    initial_loss += tf.reduce_mean(tf.square(velocities[:, 0] - u_value))
+                
+                if 'v' in initial_data['conditions']:
+                    v_value = initial_data['conditions']['v']['value']
+                    initial_loss += tf.reduce_mean(tf.square(velocities[:, 1] - v_value))
+                
+                if 'p' in initial_data['conditions'] and initial_data['conditions']['p'] is not None:
+                    p_value = initial_data['conditions']['p']['value']
+                    initial_loss += tf.reduce_mean(tf.square(pressure - p_value))
 
             except Exception as e:
                 print(f"Warning: Error processing initial condition {var_name}: {str(e)}")
