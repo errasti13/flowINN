@@ -72,75 +72,65 @@ class PINN:
     def generate_batches(self, mesh, num_batches, time_window_size=3):
         """Generate batches for training using a sliding time window approach."""
         
+        batches = []
+
         if mesh.is_unsteady:
             spatial_points = len(mesh.x)
             time_points = len(mesh.t)
-            
-            # Create flattened arrays for the space-time grid
-            x_grid = np.tile(mesh.x, time_points)
-            y_grid = np.tile(mesh.y, time_points)
-            t_grid = np.repeat(mesh.t, spatial_points)
-            
-            # Calculate points per batch
-            points_per_batch = (spatial_points * time_points) // num_batches
-            
-            batches = []
-            for i in range(num_batches):
-                # Select random starting points for time windows
-                start_indices = np.random.choice(
-                    spatial_points * (time_points - time_window_size + 1), 
-                    size=points_per_batch // time_window_size, 
-                    replace=False
-                )
-                
-                # Collect indices for all points in each time window
-                all_indices = []
-                for start_idx in start_indices:
-                    space_idx = start_idx % spatial_points
-                    time_idx = start_idx // spatial_points
-                    
-                    for t in range(time_window_size):
-                        current_time_idx = time_idx + t
-                        if current_time_idx < time_points:
-                            idx = space_idx + current_time_idx * spatial_points
-                            all_indices.append(idx)
-                
-                all_indices = np.array(all_indices)
-                
-                # Create batch tensors
-                batch = (
-                    tf.convert_to_tensor(x_grid[all_indices], dtype=tf.float32),
-                    tf.convert_to_tensor(y_grid[all_indices], dtype=tf.float32),
-                    tf.convert_to_tensor(t_grid[all_indices], dtype=tf.float32)
-                )
+            total_points = spatial_points * time_points
+            points_per_batch = total_points // num_batches
+
+            # Compute cubic root to get sample points per dimension
+            points_per_dim = int(np.cbrt(points_per_batch))
+
+            for batch_idx in range(num_batches):
+                print(f"[DEBUG] Generating batch {batch_idx+1}/{num_batches}")
+
+                # Sample indices from each dimension
+                x_indices = np.random.choice(spatial_points, size=points_per_dim, replace=True)
+                y_indices = np.random.choice(spatial_points, size=points_per_dim, replace=True)
+                t_indices = np.random.choice(time_points, size=points_per_dim, replace=True)
+
+                batch_coords = []
+                for x in x_indices:
+                    for y in y_indices:
+                        for t in t_indices:
+                            # Debug to check if indices return scalars or arrays
+                            x_val, y_val, t_val = mesh.x[x][0], mesh.y[y][0], mesh.t[t]
+
+                            batch_coords.append([x_val, y_val, t_val])
+
+                # Convert to NumPy array
+                batch_coords = np.array(batch_coords, dtype=np.float32)
+
+                # Trim excess points
+                batch_coords = batch_coords[:points_per_batch]
+
+                # Convert to tensor
+                batch = tf.convert_to_tensor(batch_coords)
                 batches.append(batch)
-        
-        # For steady problems
+
         else:
             total_points = len(mesh.x)
             indices = np.random.permutation(total_points)
             batch_size = total_points // num_batches
-            
-            batches = []
+
             for i in range(num_batches):
                 start_idx = i * batch_size
                 end_idx = min(start_idx + batch_size, total_points)
                 batch_indices = indices[start_idx:end_idx]
 
                 if hasattr(mesh, 'is2D') and mesh.is2D:
-                    batch = (
-                        tf.convert_to_tensor(mesh.x[batch_indices], dtype=tf.float32),
-                        tf.convert_to_tensor(mesh.y[batch_indices], dtype=tf.float32)
-                    )
+                    batch_coords = np.column_stack((mesh.x[batch_indices], mesh.y[batch_indices]))
                 else:
-                    batch = (
-                        tf.convert_to_tensor(mesh.x[batch_indices], dtype=tf.float32),
-                        tf.convert_to_tensor(mesh.y[batch_indices], dtype=tf.float32),
-                        tf.convert_to_tensor(mesh.z[batch_indices], dtype=tf.float32)
-                    )
+                    batch_coords = np.column_stack((mesh.x[batch_indices], mesh.y[batch_indices], mesh.z[batch_indices]))
+
+                # Convert to tensor
+                batch = tf.convert_to_tensor(batch_coords, dtype=tf.float32)
                 batches.append(batch)
-        
+
         return batches
+
 
     @tf.function(jit_compile=True)
     def train_step(self, loss_function, batch_data) -> tf.Tensor:
