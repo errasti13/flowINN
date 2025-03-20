@@ -71,7 +71,6 @@ class PINN:
 
     def generate_batches(self, mesh, num_batches, time_window_size=3):
         """Generate batches for training using a sliding time window approach."""
-        
         batches = []
 
         if mesh.is_unsteady:
@@ -80,11 +79,9 @@ class PINN:
             total_points = spatial_points * time_points
             points_per_batch = total_points // num_batches
 
-            # Compute cubic root to get sample points per dimension
             points_per_dim = int(np.cbrt(points_per_batch))
 
             for batch_idx in range(num_batches):
-                # Sample indices from each dimension
                 x_indices = np.random.choice(spatial_points, size=points_per_dim, replace=True)
                 y_indices = np.random.choice(spatial_points, size=points_per_dim, replace=True)
                 t_indices = np.random.choice(time_points, size=points_per_dim, replace=True)
@@ -93,57 +90,50 @@ class PINN:
                 for x in x_indices:
                     for y in y_indices:
                         for t in t_indices:
-                            # Debug to check if indices return scalars or arrays
-                            x_val, y_val, t_val = mesh.x[x][0], mesh.y[y][0], mesh.t[t]
-
+                            x_val = float(mesh.x[x])
+                            y_val = float(mesh.y[y]) 
+                            t_val = float(mesh.t[t])
                             batch_coords.append([x_val, y_val, t_val])
 
-                # Convert to NumPy array
                 batch_coords = np.array(batch_coords, dtype=np.float32)
-
-                # Trim excess points
                 batch_coords = batch_coords[:points_per_batch]
-
-                # Convert to tensor
-                batch = tf.convert_to_tensor(batch_coords)
-                batches.append(batch)
+                batches.append(tf.convert_to_tensor(batch_coords))
 
         else:
             total_points = len(mesh.x)
             points_per_batch = total_points // num_batches
             
-            # Compute square root for 2D or cubic root for 3D to get sample points per dimension
-            points_per_dim = int(np.sqrt(points_per_batch) if hasattr(mesh, 'is2D') and mesh.is2D 
-                               else np.cbrt(points_per_batch))
+            points_per_dim = int(np.sqrt(points_per_batch) if mesh.is2D else np.cbrt(points_per_batch))
 
             for batch_idx in range(num_batches):
                 batch_coords = []
-                x_indices = np.random.choice(total_points, size=points_per_dim, replace=True)
-                y_indices = np.random.choice(total_points, size=points_per_dim, replace=True)
-
-                if hasattr(mesh, 'is2D') and mesh.is2D:
+                if mesh.is2D:
+                    x_indices = np.random.choice(total_points, size=points_per_dim, replace=True)
+                    y_indices = np.random.choice(total_points, size=points_per_dim, replace=True)
+                    
                     for x in x_indices:
                         for y in y_indices:
-                            x_val, y_val = mesh.x[x][0], mesh.y[y][0]
+                            x_val = float(mesh.x[x])
+                            y_val = float(mesh.y[y])
                             batch_coords.append([x_val, y_val])
                 else:
+                    x_indices = np.random.choice(total_points, size=points_per_dim, replace=True)
+                    y_indices = np.random.choice(total_points, size=points_per_dim, replace=True)
                     z_indices = np.random.choice(total_points, size=points_per_dim, replace=True)
+                    
                     for x in x_indices:
                         for y in y_indices:
                             for z in z_indices:
-                                x_val, y_val, z_val = mesh.x[x][0], mesh.y[y][0], mesh.z[z][0]
+                                x_val = float(mesh.x[x])
+                                y_val = float(mesh.y[y])
+                                z_val = float(mesh.z[z])
                                 batch_coords.append([x_val, y_val, z_val])
 
-                # Convert to NumPy array and trim excess points
                 batch_coords = np.array(batch_coords, dtype=np.float32)
                 batch_coords = batch_coords[:points_per_batch]
-
-                # Convert to tensor
-                batch = tf.convert_to_tensor(batch_coords)
-                batches.append(batch)
+                batches.append(tf.convert_to_tensor(batch_coords))
 
         return batches
-
 
     @tf.function(jit_compile=True)
     def train_step(self, loss_function, batch_data) -> tf.Tensor:
