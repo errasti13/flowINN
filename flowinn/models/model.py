@@ -178,7 +178,7 @@ class PINN:
               plot_loss: bool = False, bc_plot_interval: Optional[int] = None, 
               domain_range: Optional[Tuple[Tuple[float, float], Tuple[float, float]]] = None,
               airfoil_coords: Optional[Tuple[np.ndarray, np.ndarray]] = None,
-              output_dir: str = 'bc_plots', patience: int = 1000, min_delta: float = 1e-6) -> None:
+              output_dir: str = 'bc_plots', patience: int = 10000, min_delta: float = 1e-6) -> None:
         loss_history = []
         epoch_history = []
         last_loss = float('inf')
