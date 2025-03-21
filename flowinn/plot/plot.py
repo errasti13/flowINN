@@ -487,7 +487,7 @@ class Plot:
         plt.tight_layout()
         plt.show()
 
-    def scatterPlot(self, solkey: str, title: str = None, savePath: str = None) -> None:
+    def scatterPlot(self, solkey: str, title: str = None, savePath: str = None, show: bool = False) -> None:
         """
         Visualizes the solution field using scatter plot with boundaries.
 
@@ -581,8 +581,10 @@ class Plot:
 
         plt.tight_layout()
         if savePath is not None:
-            plt.savefig(savePath)   
-        plt.show()
+            plt.savefig(savePath)
+
+        if show:
+            plt.show()
 
     def plotSlices(self, solkey: str, num_points: int = 50, z_cuts: Optional[list] = None) -> None:
         """
