@@ -586,6 +586,8 @@ class Plot:
         if show:
             plt.show()
 
+        plt.close()
+
     def plotSlices(self, solkey: str, num_points: int = 50, z_cuts: Optional[list] = None) -> None:
         """
         Create slice plots for 3D solution fields using interpolation onto regular grids.
