@@ -7,24 +7,47 @@ from flowinn.plot.boundary_visualization import BoundaryVisualization
 
 # Custom Fourier Feature Mapping layer
 class FourierFeatureMapping(tf.keras.layers.Layer):
-    def __init__(self, mapping_size: int = 64, scale: float = 10.0, **kwargs):
+    def __init__(self, mapping_size: int = 64, scale: float = 10.0, temporal_scale: float = None, **kwargs):
         """
         Args:
             mapping_size (int): The number of random Fourier features.
             scale (float): Scale factor for the random weights.
+            temporal_scale (float): Optional separate scale for temporal dimension.
+                                   If None, uses the same scale for all dimensions.
         """
         super(FourierFeatureMapping, self).__init__(**kwargs)
         self.mapping_size = mapping_size
         self.scale = scale
+        self.temporal_scale = temporal_scale
 
     def build(self, input_shape):
         # Create a fixed random projection matrix (non-trainable)
-        self.B = self.add_weight(
-            name='B',
-            shape=(input_shape[-1], self.mapping_size),
-            initializer=tf.random_normal_initializer(stddev=self.scale),
-            trainable=False
-        )
+        if self.temporal_scale is not None and input_shape[-1] >= 3:
+            # For space-time problems, use different scales for spatial and temporal dimensions
+            # Create a diagonal matrix with different scales
+            scales = tf.ones(input_shape[-1], dtype=tf.float32)
+            # Set temporal dimension (assuming it's the last one) to have different scale
+            scales = tf.tensor_scatter_nd_update(scales, [[input_shape[-1]-1]], [self.temporal_scale/self.scale])
+            
+            # Create random weights with proper scaling applied per dimension
+            B_init = tf.random_normal_initializer(stddev=1.0)(shape=(input_shape[-1], self.mapping_size))
+            # Apply the scaling factors to each dimension
+            B_init = tf.einsum('i,ij->ij', scales, B_init) * self.scale
+            
+            self.B = self.add_weight(
+                name='B',
+                shape=(input_shape[-1], self.mapping_size),
+                initializer=lambda *args, **kwargs: B_init,
+                trainable=False
+            )
+        else:
+            # Use the original implementation for non-temporal problems
+            self.B = self.add_weight(
+                name='B',
+                shape=(input_shape[-1], self.mapping_size),
+                initializer=tf.random_normal_initializer(stddev=self.scale),
+                trainable=False
+            )
         super(FourierFeatureMapping, self).build(input_shape)
 
     def call(self, inputs):
@@ -53,20 +76,90 @@ class PINN:
         """
         model = tf.keras.Sequential()
         model.add(tf.keras.layers.InputLayer(shape=(input_shape)))
-        # Add Fourier feature mapping layer (adjust mapping_size and scale as needed)
-        model.add(FourierFeatureMapping(mapping_size=64, scale=10.0))
+        
+        # Detect if this is likely an unsteady problem based on input shape
+        is_unsteady = input_shape >= 3
+        
+        # Add Fourier feature mapping layer with temporal-specific settings
+        if is_unsteady:
+            # For unsteady problems, use a different scale for temporal dimension
+            # Higher scale (5.0) for time dimension to better capture high-frequency oscillations
+            model.add(FourierFeatureMapping(
+                mapping_size=64,  # More features for complex temporal dynamics
+                scale=5.0,       # Lower overall scale for spatial dimensions
+                temporal_scale=25.0  # Higher scale for temporal dimension
+            ))
+        else:
+            # For steady problems, use standard Fourier features
+            model.add(FourierFeatureMapping(mapping_size=32, scale=10.0))
+        
         # Follow with hidden Dense layers
-        for units in layers:
-            model.add(tf.keras.layers.Dense(units, activation=activation))
+        for i, units in enumerate(layers):
+            # Add dropout after some layers to prevent overfitting
+            if i > 0 and i % 2 == 0 and is_unsteady:
+                model.add(tf.keras.layers.Dropout(0.1))
+                
+            # Add dense layer with specified activation
+            model.add(tf.keras.layers.Dense(
+                units, 
+                activation=activation,
+                kernel_initializer=tf.keras.initializers.GlorotNormal()
+            ))
+            
         # Final output layer
         model.add(tf.keras.layers.Dense(output_shape))
         return model
 
-    def learning_rate_schedule(self, initial_learning_rate: float) -> tf.keras.optimizers.schedules.ExponentialDecay:
+    def learning_rate_schedule(self, initial_learning_rate: float) -> tf.keras.optimizers.schedules.LearningRateSchedule:
+        """Create an advanced learning rate schedule suitable for PINNs."""
+        
+        # For unsteady problems, use a warm-up followed by cosine decay
+        if hasattr(self, 'model') and self.model is not None:
+            input_shape = self.model.input_shape[-1]
+            if input_shape >= 3:  # Likely an unsteady problem if input_dim >= 3
+                # Create a custom schedule for unsteady problems
+                class CustomWarmupCosineDecay(tf.keras.optimizers.schedules.LearningRateSchedule):
+                    def __init__(self, initial_lr, warmup_steps=500, decay_steps=20000, min_lr_ratio=0.01):
+                        super().__init__()
+                        self.initial_lr = initial_lr
+                        self.warmup_steps = warmup_steps
+                        self.decay_steps = decay_steps
+                        self.min_lr = initial_lr * min_lr_ratio
+                        
+                    def __call__(self, step):
+                        # Convert to float
+                        step = tf.cast(step, tf.float32)
+                        
+                        # Linear warmup phase
+                        warmup_lr = self.initial_lr * (step / self.warmup_steps)
+                        
+                        # Cosine decay phase
+                        step_after_warmup = step - self.warmup_steps
+                        decay_fraction = step_after_warmup / self.decay_steps
+                        cosine_decay = 0.5 * (1 + tf.cos(tf.constant(np.pi) * decay_fraction))
+                        decay_lr = self.min_lr + (self.initial_lr - self.min_lr) * cosine_decay
+                        
+                        # Use warmup_lr if in warmup phase, otherwise use decay_lr
+                        return tf.cond(step < self.warmup_steps, 
+                                      lambda: warmup_lr,
+                                      lambda: decay_lr)
+                    
+                    def get_config(self):
+                        return {
+                            "initial_lr": self.initial_lr,
+                            "warmup_steps": self.warmup_steps,
+                            "decay_steps": self.decay_steps,
+                            "min_lr_ratio": self.min_lr / self.initial_lr
+                        }
+                
+                return CustomWarmupCosineDecay(initial_learning_rate)
+        
+        # Default: exponential decay for steady problems
         return tf.keras.optimizers.schedules.ExponentialDecay(
             initial_learning_rate=initial_learning_rate,
             decay_steps=1000,
-            decay_rate=0.9
+            decay_rate=0.9,
+            staircase=False
         )
 
     def generate_batches(self, mesh, num_batches, time_window_size=3):
@@ -256,7 +349,7 @@ class PINN:
         return self.model.predict(X)
 
     def load(self, model_name: str) -> None:
-        filepath: str = f'trainedModels/{model_name}.tf'
+        filepath: str = f'trainedModels/{model_name}.keras'
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"The specified file does not exist: {filepath}")
         try:

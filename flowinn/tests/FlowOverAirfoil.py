@@ -362,7 +362,7 @@ class FlowOverAirfoil:
                     f"Available keys: {available_keys}. "
                     f"Note: 'vMag' is automatically calculated during prediction."
                 )
-            self.Plot.scatterPlot(solkey)
+            self.Plot.scatterPlot(solkey, show=True)
         elif plot_type == 'slices':
             if self.mesh.is2D:
                 raise ValueError("Slice plotting is only available for 3D meshes")

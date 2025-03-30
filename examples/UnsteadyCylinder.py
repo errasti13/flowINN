@@ -5,19 +5,19 @@ def main():
     case_name = "UnsteadyCylinder"
     x_range = (-4.0, 8.0)  # Domain length
     y_range = (-4.0, 4.0)  # Domain height
-    t_range = (0.0, 10.0)  # Time range
+    t_range = (0.0, 10.0)  # Time range - shorter time period for better resolution
     
     # Training parameters
-    epochs = 10000
-    print_interval = 100
-    autosave_interval = 10000
+    epochs = 30000        # More epochs for better convergence
+    print_interval = 100  # Less frequent printing
+    autosave_interval = 1000
     
     # Mesh parameters
-    nx = 100
-    ny = 100
-    nt = 1000
+    nx = 70
+    ny = 70
+    nt = 150              # Increased time discretization
     n_boundary = 300
-    num_batches = 16
+    num_batches = 16      # More batches for better sampling
 
     trainedModel = False
     

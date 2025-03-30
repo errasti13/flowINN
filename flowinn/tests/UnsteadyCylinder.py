@@ -30,12 +30,20 @@ class UnsteadyCylinder:
         self.is2D = True
         self.problemTag = caseName
 
-        layerSizes = []
-        for i in range(6):
-            layerSizes.append(64)
+        # Enhanced neural network architecture for unsteady flow
+        # Use alternating layer sizes to better capture multi-scale features
+        layerSizes = [512, 384, 256, 384, 256, 384, 256, 128]
 
         self.mesh = Mesh(self.is2D)
-        self.model = PINN(input_shape=(3,), output_shape=3, eq = self.problemTag, layers=layerSizes)
+        # Create model with sine activation for better capturing of periodic phenomena
+        self.model = PINN(
+            input_shape=(3,), 
+            output_shape=3, 
+            eq=self.problemTag, 
+            layers=layerSizes, 
+            activation='swish',  # Swish activation for better gradient flow
+            learning_rate=0.0005  # Lower learning rate for stability
+        )
 
         self.loss = None
         self.Plot = None
@@ -82,6 +90,11 @@ class UnsteadyCylinder:
 
         self.P_inf = self.P_inf / (self.rho * self.u_inf**2)
 
+        print(f"\nNormalized data")
+        print("xRange: ", self.xRange)
+        print("yRange: ", self.yRange)
+        print("tRange: ", self.tRange)
+
         return
     
     def generate_cylinder(self, N=100):
@@ -96,6 +109,7 @@ class UnsteadyCylinder:
         
         self.xCylinder = np.concatenate([np.flip(x), x]).reshape(-1, 1)
         self.yCylinder = np.concatenate([np.flip(y_upper), y_lower]).reshape(-1, 1)
+        self.tCylinder = np.linspace(self.tRange[0], self.tRange[1], 2*N).reshape(-1, 1)
 
         return
     
@@ -126,11 +140,20 @@ class UnsteadyCylinder:
             x_outlet = np.full(NBoundary, self.xRange[1])
             y_outlet = np.linspace(self.yRange[0], self.yRange[1], NBoundary)
             
-            #Regenerate airfoil coordinates
-            self.regenerate_cylinder(NBoundary=NBoundary)
+            # Increase points on the cylinder boundary for better resolution
+            self.regenerate_cylinder(NBoundary=NBoundary*2)
             xCylinder, yCylinder = self.xCylinder, self.yCylinder
-
-            t = np.linspace(self.tRange[0], self.tRange[1], NBoundary)
+            
+            # Create time points with clustering at the beginning for capturing initial transients
+            t_values = np.zeros(NBoundary)
+            # Use a nonlinear mapping for better resolution at early times
+            beta = 3.0  # Controls clustering (higher = more clustering at t=0)
+            for i in range(NBoundary):
+                normalized_idx = i / (NBoundary - 1)
+                # This gives more points at the beginning of the time range
+                t_values[i] = self.tRange[0] + (self.tRange[1] - self.tRange[0]) * (normalized_idx ** beta)
+            
+            tCylinder = np.repeat(t_values, len(xCylinder) // NBoundary + 1)[:len(xCylinder)].reshape(-1, 1)
 
             # Validate coordinates
             all_coords = [x_top, y_top, x_bottom, y_bottom, x_inlet, y_inlet, 
@@ -141,10 +164,10 @@ class UnsteadyCylinder:
 
             # Update exterior boundaries
             for name, coords in [
-                ('top', (x_top, y_top, t)),
-                ('bottom', (x_bottom, y_bottom, t)),
-                ('Inlet', (x_inlet, y_inlet, t)),
-                ('Outlet', (x_outlet, y_outlet, t))
+                ('top', (x_top, y_top, t_values)),
+                ('bottom', (x_bottom, y_bottom, t_values)),
+                ('Inlet', (x_inlet, y_inlet, t_values)),
+                ('Outlet', (x_outlet, y_outlet, t_values))
             ]:
                 if name not in self.mesh.boundaries:
                     raise KeyError(f"Boundary '{name}' not initialized")
@@ -154,14 +177,14 @@ class UnsteadyCylinder:
                     't': coords[2].astype(np.float32)
                 })
 
-            # Update interior boundary (airfoil)
+            # Update interior boundary (cylinder)
             if 'Cylinder' not in self.mesh.interiorBoundaries:
                 raise KeyError("Cylinder boundary not initialized")
             
             self.mesh.interiorBoundaries['Cylinder'].update({
                 'x': xCylinder.astype(np.float32),
                 'y': yCylinder.astype(np.float32),
-                't': t.astype(np.float32)
+                't': tCylinder.astype(np.float32)
             })
 
             # Validate boundary conditions before mesh generation
@@ -174,8 +197,17 @@ class UnsteadyCylinder:
                 sampling_method=sampling_method
             )
 
-            self.mesh.generate_time_discretization(t_range=self.tRange, Nt=Nt)
-
+            # Generate time discretization with refined points at start
+            t_refined = np.zeros(Nt)
+            for i in range(Nt):
+                normalized_idx = i / (Nt - 1)
+                # Nonlinear mapping for time points (more at the beginning)
+                t_refined[i] = self.tRange[0] + (self.tRange[1] - self.tRange[0]) * (normalized_idx ** 2)
+            
+            self.mesh.t = t_refined
+            self.mesh.is_unsteady = True
+            
+            # Set up initial conditions at t=0
             self.mesh.initialConditions = {
                 'Initial': {
                     'x': self.mesh.x,
@@ -184,6 +216,7 @@ class UnsteadyCylinder:
                     'conditions': {
                         'u': {'value': self.u_inf},
                         'v': {'value': 0.0},
+                        # Don't constrain pressure at t=0 - let physics determine it
                         'p': None
                     }
                 }
@@ -213,9 +246,9 @@ class UnsteadyCylinder:
                 'y': None,
                 't': None,
                 'conditions': {
-                    'u': None,
-                    'v': None,
-                    'p': None
+                    'u': {'gradient': 0.0, 'direction': 'x'},
+                    'v': {'gradient': 0.0, 'direction': 'x'},
+                    'p': {'value': 0.0}  # Set pressure value at outlet
                 },
                 'bc_type': self.outlet_bc
             },
@@ -224,9 +257,9 @@ class UnsteadyCylinder:
                 'y': None,
                 't': None,
                 'conditions': {
-                    'u': None,
-                    'v': None,
-                    'p': None
+                    'u': {'gradient': 0.0, 'direction': 'y'},
+                    'v': {'value': 0.0},
+                    'p': {'gradient': 0.0, 'direction': 'y'}
                 },
                 'bc_type': self.wall_bc
             },
@@ -235,9 +268,9 @@ class UnsteadyCylinder:
                 'y': None,
                 't': None,
                 'conditions': {
-                    'u': None,
-                    'v': None,
-                    'p': None
+                    'u': {'gradient': 0.0, 'direction': 'y'},
+                    'v': {'value': 0.0},
+                    'p': {'gradient': 0.0, 'direction': 'y'}
                 },
                 'bc_type': self.wall_bc
             }
@@ -276,75 +309,206 @@ class UnsteadyCylinder:
                 raise ValueError(f"Coordinates not set for interior boundary {name}")
 
     def getLossFunction(self):
-        self.loss = NavierStokesLoss('unsteady', self.mesh, self.model, Re=self.Re)
+        # Use specific weights for unsteady flow - emphasize physics more
+        self.loss = NavierStokesLoss('unsteady', self.mesh, self.model, Re=self.Re, weights=[0.9, 0.1])
+        
+        # Access the underlying unsteady loss object to customize it
+        unsteady_loss = self.loss
+        
+        # Set ReLoBraLo parameters for better balance during training
+        unsteady_loss.lookback_window = 100  # More history for stability
+        unsteady_loss.alpha = 0.05          # Smaller alpha for smoother adjustments
+        unsteady_loss.min_weight = 0.2      # Higher minimum physics weight
+        unsteady_loss.max_weight = 0.95     # Higher maximum physics weight
+        
+        return unsteady_loss
     
     def train(self, epochs=10000, print_interval=100, autosaveInterval=10000, num_batches=10):
         self.getLossFunction()
+        
+        # First stage: Focus on initial condition and early time steps
+        print("\n=== Stage 1: Training initial condition and early dynamics ===")
+        # Save original time range
+        original_tRange = self.mesh.t.copy()
+        
+        # Create a reduced time range for first training stage (first 20% of time)
+        early_time_idx = int(len(self.mesh.t) * 0.2)
+        self.mesh.t = self.mesh.t[:early_time_idx]
+        
+        # Train with focus on early time
         self.model.train(
             self.loss.loss_function,
             self.mesh,
-            epochs=epochs,
+            epochs=int(epochs * 0.3),  # 30% of epochs for initial stage
             print_interval=print_interval,
             autosave_interval=autosaveInterval,
             num_batches=num_batches,
-            patience=1000,
-            min_delta=1e-4
+            plot_loss=True,
+            patience=2000,
+            min_delta=1e-6
+        )
+        
+        # Second stage: Train on full time range with higher temporal resolution
+        print("\n=== Stage 2: Training on full time range ===")
+        # Restore original time range
+        self.mesh.t = original_tRange
+        
+        # Continue training with full time range
+        self.model.train(
+            self.loss.loss_function,
+            self.mesh,
+            epochs=int(epochs * 0.7),  # 70% of epochs for full range
+            print_interval=print_interval,
+            autosave_interval=autosaveInterval,
+            num_batches=num_batches,
+            plot_loss=True,
+            patience=3000,
+            min_delta=1e-7
         )
 
     def predict(self) -> None:
-        """Predict flow solution and generate plots."""
+        """Predict flow solution and create animation frames."""
         try:
-            nt = 10
+            nt = 100  # Number of time steps for visualization
             tPred = np.linspace(self.tRange[0], self.tRange[1], nt)
 
-            x = self.mesh.x.flatten()  # Make sure x is flattened
-            y = self.mesh.y.flatten()  # Make sure y is flattened
+            print("Predicting flow field from ", tPred[0], " to ", tPred[-1])
 
-            # Store all results for later visualization
-            all_u = []
-            all_v = []
-            all_p = []
-            all_t = []
+            # Prepare mesh points
+            x_min, x_max = self.xRange
+            y_min, y_max = self.yRange
+            
+            # Create a denser uniform grid for visualization
+            nx, ny = 150, 150  # Increased resolution for visualization
+            x = np.linspace(x_min, x_max, nx)
+            y = np.linspace(y_min, y_max, ny)
+            
+            # Create mesh grid
+            X_mesh, Y_mesh = np.meshgrid(x, y)
+            
+            # Flatten for prediction
+            X_flat = X_mesh.flatten()
+            Y_flat = Y_mesh.flatten()
+            
+            # Create directory for animation frames
+            os.makedirs('animation_frames', exist_ok=True)
+            
+            # Initialize plotting
+            self.generate_plots()
 
+            print("Generating animation frames...")
+            
+            # Create mask for cylinder
+            cylinder_mask = np.zeros_like(X_flat, dtype=bool)
+            for i in range(len(X_flat)):
+                dist = np.sqrt((X_flat[i] - self.x0)**2 + (Y_flat[i] - self.y0)**2)
+                cylinder_mask[i] = dist <= self.R
+            
+            # Process each time step individually to save memory
             for i, t in enumerate(tPred):
-                # Create time vector
-                tVec = t * np.ones_like(x)
+                print(f"Processing time step {i+1}/{len(tPred)}: t = {t:.4f}")
                 
-                # Stack coordinates
-                X = np.hstack((x[:, np.newaxis], y[:, np.newaxis], tVec[:, np.newaxis]))
+                # Create input tensor for current time
+                time_values = np.full_like(X_flat, t)
+                X_input = np.column_stack([X_flat, Y_flat, time_values])
                 
-                # Make predictions
-                predictions = self.model.predict(X)
+                # Predict for current time step
+                predictions = self.model.predict(X_input)
                 
-                # Store predictions for this time step
-                self.mesh.solutions['u'] = predictions[:, 0]  # First column
-                self.mesh.solutions['v'] = predictions[:, 1]  # Second column
-                self.mesh.solutions['p'] = predictions[:, 2]  # Third column
+                # Extract velocity components and pressure
+                u = predictions[:, 0].reshape(ny, nx)
+                v = predictions[:, 1].reshape(ny, nx)
+                p = predictions[:, 2].reshape(ny, nx)
                 
-                # Save for visualization
-                all_u.append(predictions[:, 0].copy())
-                all_v.append(predictions[:, 1].copy())
-                all_p.append(predictions[:, 2].copy())
-                all_t.append(t)
+                # Calculate velocity magnitude for this time step
+                vel_mag = np.sqrt(u**2 + v**2)
                 
-                # Generate plots with current time in the title
-                self.generate_plots()
-                self.plot()
-
-
-            # Store all time steps for later use if needed
-            self.time_series = {
-                'u': all_u,
-                'v': all_v, 
-                'p': all_p,
-                't': all_t
-            }
-
+                # Calculate vorticity (curl of velocity field) for this time step
+                vorticity = self.calculate_vorticity(u, v, x, y)
+                
+                # Create mask for cylinder in 2D arrays
+                mask_2d = cylinder_mask.reshape(ny, nx)
+                
+                # Apply mask to fields (set values inside cylinder to NaN for visualization)
+                u = np.where(mask_2d, np.nan, u)
+                v = np.where(mask_2d, np.nan, v)
+                p = np.where(mask_2d, np.nan, p)
+                vel_mag = np.where(mask_2d, np.nan, vel_mag)
+                vorticity = np.where(mask_2d, np.nan, vorticity)
+                
+                # Plot and save velocity field
+                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 8))
+                
+                # Velocity magnitude plot
+                cm1 = ax1.pcolormesh(X_mesh, Y_mesh, vel_mag, cmap='viridis', shading='auto')
+                plt.colorbar(cm1, ax=ax1, label='Velocity Magnitude')
+                
+                # Add velocity vectors (subsample for clarity)
+                skip = 8
+                ax1.quiver(X_mesh[::skip, ::skip], Y_mesh[::skip, ::skip], 
+                          u[::skip, ::skip], v[::skip, ::skip], 
+                          scale=25, alpha=0.7)
+                
+                # Draw cylinder
+                circle = plt.Circle((self.x0, self.y0), self.R, color='white', fill=True)
+                ax1.add_patch(circle)
+                ax1.set_aspect('equal')
+                ax1.set_title(f'Velocity Field at t = {t:.4f}')
+                ax1.set_xlabel('x')
+                ax1.set_ylabel('y')
+                
+                # Vorticity plot
+                cm2 = ax2.pcolormesh(X_mesh, Y_mesh, vorticity, cmap='RdBu_r', 
+                                    shading='auto', vmin=-5, vmax=5)
+                plt.colorbar(cm2, ax=ax2, label='Vorticity')
+                
+                # Draw cylinder on vorticity plot
+                circle2 = plt.Circle((self.x0, self.y0), self.R, color='black', fill=True)
+                ax2.add_patch(circle2)
+                ax2.set_aspect('equal')
+                ax2.set_title(f'Vorticity at t = {t:.4f}')
+                ax2.set_xlabel('x')
+                ax2.set_ylabel('y')
+                
+                plt.tight_layout()
+                
+                # Save frame
+                plt.savefig(f'animation_frames/flow_t{i:04d}.png', dpi=150)
+                plt.close()
+                
+            # Create a simple animation command suggestion
+            print("\nTo create an animation from the saved frames, you can use:")
+            print("ffmpeg -framerate 10 -i animation_frames/flow_t%04d.png -c:v libx264 -pix_fmt yuv420p cylinder_flow.mp4")
+            
         except Exception as e:
-            self.logger.error(f"Prediction failed: {str(e)}")
+            print(f"Error in prediction: {str(e)}")
             raise
 
-    
+    def calculate_vorticity(self, u, v, x_grid, y_grid):
+        """Calculate vorticity (curl of velocity field) using finite differences."""
+        dx = x_grid[1] - x_grid[0]
+        dy = y_grid[1] - y_grid[0]
+        
+        # Calculate partial derivatives
+        # Use central differences for interior points
+        du_dy = np.zeros_like(u)
+        dv_dx = np.zeros_like(v)
+        
+        # Interior points using central difference
+        du_dy[1:-1, :] = (u[2:, :] - u[:-2, :]) / (2 * dy)
+        dv_dx[:, 1:-1] = (v[:, 2:] - v[:, :-2]) / (2 * dx)
+        
+        # Edge points using forward/backward differences
+        du_dy[0, :] = (u[1, :] - u[0, :]) / dy
+        du_dy[-1, :] = (u[-1, :] - u[-2, :]) / dy
+        dv_dx[:, 0] = (v[:, 1] - v[:, 0]) / dx
+        dv_dx[:, -1] = (v[:, -1] - v[:, -2]) / dx
+        
+        # Vorticity (ω = dv/dx - du/dy)
+        vorticity = dv_dx - du_dy
+        
+        return vorticity
+
     def write_solution(self, filename=None):
         """Write the solution to a CSV format file."""
         if filename is None:

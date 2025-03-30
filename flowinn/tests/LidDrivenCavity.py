@@ -10,9 +10,13 @@ class LidDrivenCavity():
     def __init__(self, caseName, xRange, yRange):
         self.is2D = True
 
+        layers = []
+        for _ in range (6):
+            layers.append(64)
+            
         self.problemTag = caseName
         self.mesh  = Mesh(self.is2D)
-        self.model = PINN(input_shape=(2,), output_shape=3, eq = self.problemTag, layers=[20,40,60,40,20])
+        self.model = PINN(input_shape=(2,), output_shape=3, eq = self.problemTag, layers=layers)
 
         self.loss = None
         self.Plot = None
@@ -23,6 +27,9 @@ class LidDrivenCavity():
         # Initialize boundary conditions
         self.moving_wall_bc = MovingWallBC("top_wall")
         self.wall_bc = WallBC("wall")
+
+        # Set the Reynolds number
+        self.Re = 10
 
         return
     
@@ -97,7 +104,7 @@ class LidDrivenCavity():
         return
     
     def getLossFunction(self):
-        self.loss = NavierStokesLoss('steady', self.mesh, self.model)
+        self.loss = NavierStokesLoss('steady', self.mesh, self.model, Re = self.Re)
     
     def train(self, epochs=10000, print_interval=100, autosaveInterval=10000, num_batches=10):
         """Train the model with batch support."""
@@ -127,7 +134,7 @@ class LidDrivenCavity():
         self.Plot = Plot(self.mesh)
 
     def plot(self, solkey = 'u', streamlines = False):
-        self.Plot.plot(solkey, streamlines)
+        self.Plot.scatterPlot(solkey, show=True)
 
     def load_model(self):
         self.model.load(self.problemTag)
