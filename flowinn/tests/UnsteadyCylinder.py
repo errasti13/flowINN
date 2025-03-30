@@ -32,7 +32,9 @@ class UnsteadyCylinder:
 
         # Enhanced neural network architecture for unsteady flow
         # Use alternating layer sizes to better capture multi-scale features
-        layerSizes = [512, 384, 256, 384, 256, 384, 256, 128]
+        layerSizes = []
+        for i in range(6):
+            layerSizes.append(128)
 
         self.mesh = Mesh(self.is2D)
         # Create model with sine activation for better capturing of periodic phenomena
@@ -324,7 +326,7 @@ class UnsteadyCylinder:
         
         return unsteady_loss
     
-    def train(self, epochs=10000, print_interval=100, autosaveInterval=10000, num_batches=10):
+    def train(self, epochs=10000, print_interval=100, autosaveInterval=10000, num_batches=10, use_cpu=False):
         self.getLossFunction()
         
         # Calculate time window size based on expected flow oscillation period
@@ -336,8 +338,11 @@ class UnsteadyCylinder:
         target_window_fraction = 0.25
         
         # Calculate number of time steps corresponding to our target window
-        dt = self.tRange[1] / len(self.mesh.t)  # Approximate time step size
+        dt = (self.tRange[1] - self.tRange[0]) / len(self.mesh.t)  # Approximate time step size
         time_window_size = max(3, int(target_window_fraction * expected_period / dt))
+        
+        # Make sure window size is reasonable
+        time_window_size = min(time_window_size, 50)  # Cap window size to avoid CUDA memory issues
         
         # First stage: Focus on initial condition and early time steps with higher noise
         print(f"\n=== Stage 1: Training initial condition and early dynamics ===")
@@ -351,7 +356,8 @@ class UnsteadyCylinder:
         self.mesh.t = self.mesh.t[:early_time_idx]
         
         # Initial stage with smaller window size for early dynamics
-        early_window_size = min(time_window_size, len(self.mesh.t) // 2)
+        early_window_size = min(time_window_size, len(self.mesh.t) // 3)
+        early_window_size = max(3, early_window_size)  # Ensure at least 3 time steps
         
         # Start with higher noise level to encourage exploration
         initial_noise_level = 0.02
@@ -364,12 +370,13 @@ class UnsteadyCylinder:
             print_interval=print_interval,
             autosave_interval=autosaveInterval,
             num_batches=num_batches,
-            plot_loss=True,
+            plot_loss=False,  # Never plot loss
             patience=2000,
             min_delta=1e-6,
             time_window_size=early_window_size,
-            add_noise=True,
-            noise_level=initial_noise_level
+            add_noise=False,
+            noise_level=initial_noise_level,
+            use_cpu=use_cpu  # Pass CPU flag to handle CUDA errors
         )
         
         # Second stage: Train on full time range with medium noise
@@ -390,12 +397,13 @@ class UnsteadyCylinder:
             print_interval=print_interval,
             autosave_interval=autosaveInterval,
             num_batches=num_batches,
-            plot_loss=True,
+            plot_loss=False,  # Never plot loss
             patience=2000,
             min_delta=1e-7,
             time_window_size=time_window_size,
             add_noise=True,
-            noise_level=medium_noise_level
+            noise_level=medium_noise_level,
+            use_cpu=use_cpu  # Pass CPU flag to handle CUDA errors
         )
         
         # Third stage: Fine-tuning with minimal noise
@@ -412,21 +420,28 @@ class UnsteadyCylinder:
             print_interval=print_interval,
             autosave_interval=autosaveInterval,
             num_batches=num_batches,
-            plot_loss=True,
+            plot_loss=False,  # Never plot loss
             patience=1000,
             min_delta=1e-8,
             time_window_size=time_window_size,
             add_noise=True,
-            noise_level=final_noise_level
+            noise_level=final_noise_level,
+            use_cpu=use_cpu  # Pass CPU flag to handle CUDA errors
         )
 
-    def predict(self) -> None:
-        """Predict flow solution and create animation frames."""
+    def predict(self, use_cpu=False) -> None:
+        """
+        Predict flow solution and create animation frames.
+        
+        Args:
+            use_cpu: Whether to force CPU usage (not recommended if trained on GPU)
+        """
         try:
             nt = 100  # Number of time steps for visualization
             tPred = np.linspace(self.tRange[0], self.tRange[1], nt)
 
             print("Predicting flow field from ", tPred[0], " to ", tPred[-1])
+            print(f"Device strategy: {'CPU' if use_cpu else 'GPU if available, else CPU'}")
 
             # Prepare mesh points
             x_min, x_max = self.xRange
@@ -466,8 +481,36 @@ class UnsteadyCylinder:
                 time_values = np.full_like(X_flat, t)
                 X_input = np.column_stack([X_flat, Y_flat, time_values])
                 
-                # Predict for current time step
-                predictions = self.model.predict(X_input)
+                # Try to predict with the model on the same device it was trained on
+                try:
+                    # Use model without forcing device change
+                    predictions = self.model.predict(X_input, use_cpu=use_cpu)
+                except Exception as e:
+                    print(f"Error during prediction: {e}")
+                    
+                    import tensorflow as tf
+                    try:
+                        # Try model saving and reloading approach
+                        print("Trying alternative prediction approach...")
+                        
+                        # Save current model to a temporary file
+                        temp_path = f'temp_{self.problemTag}.keras'
+                        self.model.model.save(temp_path)
+                        
+                        # Clear session
+                        tf.keras.backend.clear_session()
+                        
+                        # Load model and make prediction
+                        # (this will maintain the device placement)
+                        loaded_model = tf.keras.models.load_model(temp_path)
+                        predictions = loaded_model.predict(X_input, verbose=0)
+                        
+                        # Clean up
+                        if os.path.exists(temp_path):
+                            os.remove(temp_path)
+                    except Exception as e2:
+                        print(f"Alternative prediction approach failed: {e2}")
+                        raise RuntimeError(f"Unable to make predictions: {e}. Alternative approach error: {e2}")
                 
                 # Extract velocity components and pressure
                 u = predictions[:, 0].reshape(ny, nx)

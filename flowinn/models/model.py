@@ -570,8 +570,61 @@ class PINN:
             plt.ioff()
             plt.close()
 
-    def predict(self, X: np.ndarray) -> np.ndarray:
-        return self.model.predict(X)
+    def predict(self, X, use_cpu=False):
+        """
+        Make predictions using the model.
+        
+        Args:
+            X: Input tensor of shape (..., input_dim)
+            use_cpu: Whether to force CPU usage (not recommended if model was trained on GPU)
+            
+        Returns:
+            Predictions tensor of shape (..., output_dim)
+        """
+        # Convert input to tensor if it's numpy array
+        if isinstance(X, np.ndarray):
+            X = tf.convert_to_tensor(X, dtype=tf.float32)
+            
+        try:
+            # The safest approach is to predict on the same device where the model was created
+            if use_cpu:
+                # Only use CPU if explicitly requested (not recommended if trained on GPU)
+                with tf.device('/CPU:0'):
+                    return self.model.predict(X, verbose=0)
+            else:
+                # Use whatever device the model is currently on
+                return self.model.predict(X, verbose=0)
+                
+        except (tf.errors.ResourceExhaustedError, tf.errors.InternalError, 
+                tf.errors.FailedPreconditionError, tf.errors.InvalidArgumentError) as e:
+            print(f"\nError during prediction: {e}")
+            
+            # If we encounter an error, try a different approach that avoids
+            # device placement issues by saving and reloading the model
+            try:
+                print("Trying alternative prediction approach...")
+                
+                # Save the model to a temporary file
+                import os
+                temp_path = f"temp_model_{id(self)}.keras"
+                self.model.save(temp_path)
+                
+                # Clear session
+                tf.keras.backend.clear_session()
+                
+                # Load the model (will maintain device consistency)
+                loaded_model = tf.keras.models.load_model(temp_path)
+                predictions = loaded_model.predict(X, verbose=0)
+                
+                # Clean up
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                    
+                return predictions
+                
+            except Exception as e2:
+                print(f"Alternative prediction approach failed: {e2}")
+                raise RuntimeError(f"Failed to make predictions. Original error: {e}\nSecond error: {e2}")
 
     def load(self, model_name: str) -> None:
         filepath: str = f'trainedModels/{model_name}.keras'
