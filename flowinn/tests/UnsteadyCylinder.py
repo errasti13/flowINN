@@ -326,16 +326,36 @@ class UnsteadyCylinder:
     def train(self, epochs=10000, print_interval=100, autosaveInterval=10000, num_batches=10):
         self.getLossFunction()
         
-        # First stage: Focus on initial condition and early time steps
-        print("\n=== Stage 1: Training initial condition and early dynamics ===")
+        # Calculate time window size based on expected flow oscillation period
+        # For vortex shedding, we want to capture at least one shedding cycle in a window
+        # Strouhal number for cylinder is ~0.2, so period T ≈ 5D/U for D=1 and U=1
+        expected_period = 5.0  # Non-dimensional time units
+        
+        # Time window should be at least 1/4 of the period to capture temporal correlations
+        target_window_fraction = 0.25
+        
+        # Calculate number of time steps corresponding to our target window
+        dt = self.tRange[1] / len(self.mesh.t)  # Approximate time step size
+        time_window_size = max(3, int(target_window_fraction * expected_period / dt))
+        
+        # First stage: Focus on initial condition and early time steps with higher noise
+        print(f"\n=== Stage 1: Training initial condition and early dynamics ===")
+        print(f"Using time window size: {time_window_size} steps")
+        
         # Save original time range
         original_tRange = self.mesh.t.copy()
         
-        # Create a reduced time range for first training stage (first 20% of time)
-        early_time_idx = int(len(self.mesh.t) * 0.2)
+        # Create a reduced time range for first training stage (first 30% of time)
+        early_time_idx = int(len(self.mesh.t) * 0.3)
         self.mesh.t = self.mesh.t[:early_time_idx]
         
-        # Train with focus on early time
+        # Initial stage with smaller window size for early dynamics
+        early_window_size = min(time_window_size, len(self.mesh.t) // 2)
+        
+        # Start with higher noise level to encourage exploration
+        initial_noise_level = 0.02
+        
+        # Train with focus on early time and higher noise
         self.model.train(
             self.loss.loss_function,
             self.mesh,
@@ -345,25 +365,58 @@ class UnsteadyCylinder:
             num_batches=num_batches,
             plot_loss=True,
             patience=2000,
-            min_delta=1e-6
+            min_delta=1e-6,
+            time_window_size=early_window_size,
+            add_noise=True,
+            noise_level=initial_noise_level
         )
         
-        # Second stage: Train on full time range with higher temporal resolution
-        print("\n=== Stage 2: Training on full time range ===")
+        # Second stage: Train on full time range with medium noise
+        print(f"\n=== Stage 2: Training on full time range with medium noise ===")
+        print(f"Using time window size: {time_window_size} steps")
+        
         # Restore original time range
         self.mesh.t = original_tRange
         
-        # Continue training with full time range
+        # Medium noise level for main training phase
+        medium_noise_level = 0.01
+        
+        # Continue training with full time range, full window size, and medium noise
         self.model.train(
             self.loss.loss_function,
             self.mesh,
-            epochs=int(epochs * 0.7),  # 70% of epochs for full range
+            epochs=int(epochs * 0.5),  # 50% of epochs for main training
             print_interval=print_interval,
             autosave_interval=autosaveInterval,
             num_batches=num_batches,
             plot_loss=True,
-            patience=3000,
-            min_delta=1e-7
+            patience=2000,
+            min_delta=1e-7,
+            time_window_size=time_window_size,
+            add_noise=True,
+            noise_level=medium_noise_level
+        )
+        
+        # Third stage: Fine-tuning with minimal noise
+        print(f"\n=== Stage 3: Fine-tuning with minimal noise ===")
+        
+        # Low noise level for fine-tuning
+        final_noise_level = 0.001
+        
+        # Final fine-tuning with minimal noise
+        self.model.train(
+            self.loss.loss_function,
+            self.mesh,
+            epochs=int(epochs * 0.2),  # 20% of epochs for fine-tuning
+            print_interval=print_interval,
+            autosave_interval=autosaveInterval,
+            num_batches=num_batches,
+            plot_loss=True,
+            patience=1000,
+            min_delta=1e-8,
+            time_window_size=time_window_size,
+            add_noise=True,
+            noise_level=final_noise_level
         )
 
     def predict(self) -> None:

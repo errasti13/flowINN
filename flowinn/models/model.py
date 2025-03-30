@@ -162,8 +162,59 @@ class PINN:
             staircase=False
         )
 
-    def generate_batches(self, mesh, num_batches, time_window_size=3):
-        """Generate batches for training using a sliding time window approach."""
+    def _add_training_noise(self, batch_coords, noise_level=0.01):
+        """
+        Add small gaussian noise to the batch coordinates for better generalization
+        and to help the model escape local minima.
+        
+        Args:
+            batch_coords: Tensor of batch coordinates [x, y, t]
+            noise_level: Standard deviation of the noise as a fraction of the coordinate range
+            
+        Returns:
+            Tensor with added noise
+        """
+        # Convert to numpy for easier manipulation
+        coords_np = batch_coords.numpy()
+        
+        # Calculate noise scale for each dimension
+        scales = []
+        for dim in range(coords_np.shape[1]):
+            # Calculate range for this dimension
+            dim_range = np.max(coords_np[:, dim]) - np.min(coords_np[:, dim])
+            # Noise scale is a fraction of the range
+            scales.append(dim_range * noise_level)
+        
+        # Generate noise with appropriate scale for each dimension
+        noise = np.zeros_like(coords_np)
+        for dim in range(coords_np.shape[1]):
+            # Don't add noise to temporal dimension (assumed to be the last one) in unsteady problems
+            # This preserves the temporal correlation and sliding window structure
+            if dim == coords_np.shape[1] - 1 and coords_np.shape[1] >= 3:
+                continue
+            
+            noise[:, dim] = np.random.normal(0, scales[dim], size=coords_np.shape[0])
+        
+        # Add noise to coordinates
+        noisy_coords = coords_np + noise
+        
+        return tf.convert_to_tensor(noisy_coords, dtype=tf.float32)
+
+    def generate_batches(self, mesh, num_batches, time_window_size=3, add_noise=True, noise_level=0.01):
+        """
+        Generate batches for training using a sliding time window approach.
+        
+        For unsteady problems, this uses:
+        - Random spatial sampling for x,y coordinates
+        - Sliding window sampling for time coordinates to capture temporal correlations
+        
+        Args:
+            mesh: The mesh object containing spatial and temporal coordinates
+            num_batches: Number of batches to generate
+            time_window_size: Number of consecutive time steps in each temporal window
+            add_noise: Whether to add small noise to coordinate points for regularization
+            noise_level: Level of noise to add (as fraction of coordinate range)
+        """
         batches = []
 
         # Flatten arrays for proper indexing
@@ -171,41 +222,77 @@ class PINN:
         y_flat = mesh.y.ravel()
         z_flat = None if mesh.is2D else mesh.z.ravel()
 
-        if mesh.is_unsteady:
+        if hasattr(mesh, 'is_unsteady') and mesh.is_unsteady:
             spatial_points = len(x_flat)
             time_points = len(mesh.t)
+            
+            # Ensure time_window_size is valid
+            time_window_size = min(time_window_size, time_points)
+            
+            # Calculate points per batch
             total_points = spatial_points * time_points
             points_per_batch = total_points // num_batches
-
-            points_per_dim = int(np.cbrt(points_per_batch))
-
-            for _ in range(num_batches):
-                # Sample indices in a vectorized way
-                x_indices = np.random.choice(spatial_points, size=points_per_dim, replace=True)
-                y_indices = np.random.choice(spatial_points, size=points_per_dim, replace=True)
-                t_indices = np.random.choice(time_points, size=points_per_dim, replace=True)
+            
+            # Adjust spatial points for sliding window approach
+            points_per_spatial_dim = int(np.sqrt(points_per_batch // time_window_size))
+            
+            # Calculate how many temporal windows we need
+            num_windows = num_batches
+            
+            for batch_idx in range(num_batches):
+                # Generate random spatial indices
+                x_indices = np.random.choice(spatial_points, size=points_per_spatial_dim, replace=True)
+                y_indices = np.random.choice(spatial_points, size=points_per_spatial_dim, replace=True)
                 
-                # Create meshgrid of all combinations
-                xx, yy, tt = np.meshgrid(x_indices, y_indices, t_indices)
+                # Calculate temporal window start index using sliding window approach
+                # This creates overlapping windows that progress through time
+                if num_windows > 1:
+                    # Calculate the starting position for this window
+                    # This distributes windows evenly across the full time range
+                    max_start_idx = time_points - time_window_size
+                    window_start = int((batch_idx / (num_windows - 1)) * max_start_idx)
+                else:
+                    window_start = 0
                 
-                # Flatten and stack to get all combinations
-                all_indices = np.stack([xx.flatten(), yy.flatten(), tt.flatten()], axis=1)
+                # Create a range of consecutive time indices for this window
+                t_indices = np.arange(window_start, min(window_start + time_window_size, time_points))
                 
-                # Map indices to actual coordinate values
-                x_coords = x_flat[all_indices[:, 0]].astype(np.float32)
-                y_coords = y_flat[all_indices[:, 1]].astype(np.float32)
-                t_coords = mesh.t[all_indices[:, 2]].astype(np.float32)
+                # Create coordinate arrays for this batch
+                batch_coords = []
                 
-                # Stack to create final coordinates array
-                batch_coords = np.stack([x_coords, y_coords, t_coords], axis=1)
+                # Create all combinations of spatial and temporal coordinates for this batch
+                for t_idx in t_indices:
+                    t_val = mesh.t[t_idx]
+                    
+                    for i in range(points_per_spatial_dim):
+                        for j in range(points_per_spatial_dim):
+                            x_idx = x_indices[i]
+                            y_idx = y_indices[j]
+                            
+                            x_val = x_flat[x_idx]
+                            y_val = y_flat[y_idx]
+                            
+                            # Add this coordinate to the batch
+                            batch_coords.append([x_val, y_val, t_val])
                 
-                # Limit to points_per_batch
-                batch_coords = batch_coords[:points_per_batch]
+                # Convert to numpy array and limit size if needed
+                batch_coords = np.array(batch_coords, dtype=np.float32)
+                if len(batch_coords) > points_per_batch:
+                    # Take a random subset if we have too many points
+                    indices = np.random.choice(len(batch_coords), points_per_batch, replace=False)
+                    batch_coords = batch_coords[indices]
                 
-                # Convert to tensor and add to batches
-                batches.append(tf.convert_to_tensor(batch_coords))
-
+                # Convert to tensor
+                batch_tensor = tf.convert_to_tensor(batch_coords)
+                
+                # Add noise for regularization if requested
+                if add_noise:
+                    batch_tensor = self._add_training_noise(batch_tensor, noise_level)
+                
+                # Add to batches
+                batches.append(batch_tensor)
         else:
+            # For steady problems, use the original implementation
             total_points = len(x_flat)
             points_per_batch = total_points // num_batches
             
@@ -251,10 +338,15 @@ class PINN:
                 
                 # Limit to points_per_batch if needed
                 batch_coords = batch_coords[:points_per_batch]
-
-                batch_coords = np.array(batch_coords, dtype=np.float32)
-                batch_coords = batch_coords[:points_per_batch]
-                batches.append(tf.convert_to_tensor(batch_coords))
+                
+                # Convert to tensor
+                batch_tensor = tf.convert_to_tensor(batch_coords, dtype=tf.float32)
+                
+                # Add noise for regularization if requested
+                if add_noise:
+                    batch_tensor = self._add_training_noise(batch_tensor, noise_level)
+                
+                batches.append(batch_tensor)
 
         return batches
 
@@ -271,7 +363,29 @@ class PINN:
               plot_loss: bool = False, bc_plot_interval: Optional[int] = None, 
               domain_range: Optional[Tuple[Tuple[float, float], Tuple[float, float]]] = None,
               airfoil_coords: Optional[Tuple[np.ndarray, np.ndarray]] = None,
-              output_dir: str = 'bc_plots', patience: int = 10000, min_delta: float = 1e-6) -> None:
+              output_dir: str = 'bc_plots', patience: int = 10000, min_delta: float = 1e-6,
+              time_window_size: int = 5, add_noise: bool = True, noise_level: float = 0.01) -> None:
+        """
+        Train the model using the provided loss function.
+        
+        Args:
+            loss_function: Loss function to optimize
+            mesh: Mesh containing the domain discretization
+            epochs: Number of training epochs
+            num_batches: Number of batches per epoch
+            print_interval: Interval for printing progress
+            autosave_interval: Interval for model autosaving
+            plot_loss: Whether to plot loss during training
+            bc_plot_interval: Interval for plotting boundary conditions
+            domain_range: Range of the domain for plotting
+            airfoil_coords: Coordinates of airfoil for plotting
+            output_dir: Directory for output plots
+            patience: Patience for early stopping
+            min_delta: Minimum improvement for early stopping
+            time_window_size: Size of temporal window for unsteady problems
+            add_noise: Whether to add small noise to training points
+            noise_level: Level of noise to add (fraction of domain range)
+        """
         loss_history = []
         epoch_history = []
         last_loss = float('inf')
@@ -291,7 +405,13 @@ class PINN:
             plt.legend()
 
         for epoch in range(epochs):
-            batches = self.generate_batches(mesh, num_batches)
+            batches = self.generate_batches(
+                mesh, 
+                num_batches, 
+                time_window_size=time_window_size,
+                add_noise=add_noise,
+                noise_level=noise_level
+            )
             epoch_loss = 0.0
             
             for batch_data in batches:
