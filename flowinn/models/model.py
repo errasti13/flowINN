@@ -62,23 +62,49 @@ class PINN:
 
     def __init__(self, input_shape: int = 2, output_shape: int = 1, layers: List[int] = [20, 20, 20],
                  activation: str = 'gelu', learning_rate: float = 0.01, eq: str = None) -> None:
-        # Build the model with a Fourier feature mapping layer at the start.
-        self.model: tf.keras.Sequential = self.create_model(input_shape, output_shape, layers, activation)
+        """
+        Initialize a Physics-Informed Neural Network.
+        
+        Args:
+            input_shape: Shape of input tensor - either an integer (number of dimensions) or a tuple
+            output_shape: Number of output variables
+            layers: List of hidden layer sizes
+            activation: Activation function to use
+            learning_rate: Initial learning rate
+            eq: Equation identifier
+        """
+        self.learning_rate = learning_rate
+        self.activation = activation
+        
+        # Check if input_shape is a tuple or an integer
+        if isinstance(input_shape, tuple):
+            self.input_dim = input_shape[0] if len(input_shape) > 0 else 1
+        else:
+            self.input_dim = input_shape
+            
+        # Build the model with a Fourier feature mapping layer at the start
+        self.model: tf.keras.Sequential = self.create_model(self.input_dim, output_shape, layers, activation)
         self.model.summary()
         self.optimizer: tf.keras.optimizers.Adam = tf.keras.optimizers.Adam(
             learning_rate=self.learning_rate_schedule(learning_rate))
         self.eq: str = eq
         self.boundary_visualizer: Optional[BoundaryVisualization] = None
 
-    def create_model(self, input_shape: int, output_shape: int, layers: List[int], activation: str) -> tf.keras.Sequential:
+    def create_model(self, input_dim: int, output_shape: int, layers: List[int], activation: str) -> tf.keras.Sequential:
         """
         Creates an MFN model that begins with a Fourier feature mapping layer.
+        
+        Args:
+            input_dim: Number of input dimensions
+            output_shape: Number of output dimensions
+            layers: List of hidden layer sizes
+            activation: Activation function to use
         """
         model = tf.keras.Sequential()
-        model.add(tf.keras.layers.InputLayer(shape=(input_shape)))
+        model.add(tf.keras.layers.InputLayer(shape=(input_dim,)))
         
-        # Detect if this is likely an unsteady problem based on input shape
-        is_unsteady = input_shape >= 3
+        # Detect if this is likely an unsteady problem based on input dimensions
+        is_unsteady = input_dim >= 3
         
         # Add Fourier feature mapping layer with temporal-specific settings
         if is_unsteady:
@@ -111,12 +137,20 @@ class PINN:
         return model
 
     def learning_rate_schedule(self, initial_learning_rate: float) -> tf.keras.optimizers.schedules.LearningRateSchedule:
-        """Create an advanced learning rate schedule suitable for PINNs."""
+        """
+        Create an advanced learning rate schedule suitable for PINNs.
+        
+        Args:
+            initial_learning_rate: Starting learning rate
+            
+        Returns:
+            A learning rate schedule appropriate for the problem type
+        """
         
         # For unsteady problems, use a warm-up followed by cosine decay
-        if hasattr(self, 'model') and self.model is not None:
-            input_shape = self.model.input_shape[-1]
-            if input_shape >= 3:  # Likely an unsteady problem if input_dim >= 3
+        if hasattr(self, 'input_dim'):
+            # Check if we're dealing with an unsteady problem (input dim >= 3)
+            if self.input_dim >= 3:  # Likely an unsteady problem
                 # Create a custom schedule for unsteady problems
                 class CustomWarmupCosineDecay(tf.keras.optimizers.schedules.LearningRateSchedule):
                     def __init__(self, initial_lr, warmup_steps=500, decay_steps=20000, min_lr_ratio=0.01):

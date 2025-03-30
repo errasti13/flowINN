@@ -205,6 +205,7 @@ class UnsteadyCylinder:
                 t_refined[i] = self.tRange[0] + (self.tRange[1] - self.tRange[0]) * (normalized_idx ** 2)
             
             self.mesh.t = t_refined
+            # Set unsteady flag for proper batching
             self.mesh.is_unsteady = True
             
             # Set up initial conditions at t=0
