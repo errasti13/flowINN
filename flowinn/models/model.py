@@ -384,7 +384,7 @@ class PINN:
 
         return batches
 
-    @tf.function(jit_compile=True)
+    @tf.function
     def train_step(self, loss_function, batch_data) -> tf.Tensor:
         with tf.GradientTape() as tape:
             loss = loss_function(batch_data=batch_data)
@@ -398,7 +398,8 @@ class PINN:
               domain_range: Optional[Tuple[Tuple[float, float], Tuple[float, float]]] = None,
               airfoil_coords: Optional[Tuple[np.ndarray, np.ndarray]] = None,
               output_dir: str = 'bc_plots', patience: int = 10000, min_delta: float = 1e-6,
-              time_window_size: int = 5, add_noise: bool = True, noise_level: float = 0.01) -> None:
+              time_window_size: int = 5, add_noise: bool = True, noise_level: float = 0.01,
+              use_cpu: bool = False) -> None:
         """
         Train the model using the provided loss function.
         
@@ -419,7 +420,72 @@ class PINN:
             time_window_size: Size of temporal window for unsteady problems
             add_noise: Whether to add small noise to training points
             noise_level: Level of noise to add (fraction of domain range)
+            use_cpu: Force CPU usage (set to True if GPU/CUDA errors occur)
         """
+        # Set device strategy based on use_cpu flag or auto-detect issues
+        if use_cpu:
+            print("Using CPU for training (GPU disabled)")
+            with tf.device('/CPU:0'):
+                self._train_implementation(
+                    loss_function, mesh, epochs, num_batches, 
+                    print_interval, autosave_interval, plot_loss, 
+                    bc_plot_interval, domain_range, airfoil_coords, 
+                    output_dir, patience, min_delta, time_window_size, 
+                    add_noise, noise_level
+                )
+        else:
+            try:
+                # Try with default device
+                self._train_implementation(
+                    loss_function, mesh, epochs, num_batches, 
+                    print_interval, autosave_interval, plot_loss, 
+                    bc_plot_interval, domain_range, airfoil_coords, 
+                    output_dir, patience, min_delta, time_window_size, 
+                    add_noise, noise_level
+                )
+            except (tf.errors.ResourceExhaustedError, tf.errors.InternalError, 
+                   tf.errors.FailedPreconditionError) as e:
+                print(f"\nGPU error encountered: {e}")
+                print("Falling back to CPU training...")
+                
+                # Clear any GPU memory
+                tf.keras.backend.clear_session()
+                
+                # Recreate model architecture
+                old_weights = self.model.get_weights()
+                
+                # Replace model with same architecture
+                self.model = self.create_model(self.input_dim, self.model.output_shape[-1], 
+                                              [layer.units for layer in self.model.layers 
+                                               if isinstance(layer, tf.keras.layers.Dense)][:-1], 
+                                              self.activation)
+                
+                # Transfer weights if possible
+                try:
+                    self.model.set_weights(old_weights)
+                except:
+                    print("Could not transfer weights - reinitializing...")
+                
+                # Reset optimizer
+                self.optimizer = tf.keras.optimizers.Adam(
+                    learning_rate=self.learning_rate_schedule(self.learning_rate))
+                
+                # Run on CPU
+                with tf.device('/CPU:0'):
+                    self._train_implementation(
+                        loss_function, mesh, epochs, num_batches, 
+                        print_interval, autosave_interval, plot_loss, 
+                        bc_plot_interval, domain_range, airfoil_coords, 
+                        output_dir, patience, min_delta, time_window_size, 
+                        add_noise, noise_level
+                    )
+
+    def _train_implementation(self, loss_function, mesh, epochs, num_batches,
+                          print_interval, autosave_interval, plot_loss, 
+                          bc_plot_interval, domain_range, airfoil_coords,
+                          output_dir, patience, min_delta, time_window_size, 
+                          add_noise, noise_level):
+        """Implementation of the training process, separated for device context management."""
         loss_history = []
         epoch_history = []
         last_loss = float('inf')
@@ -449,8 +515,13 @@ class PINN:
             epoch_loss = 0.0
             
             for batch_data in batches:
-                batch_loss = self.train_step(loss_function, batch_data)
-                epoch_loss += batch_loss
+                try:
+                    batch_loss = self.train_step(loss_function, batch_data)
+                    epoch_loss += batch_loss
+                except (tf.errors.ResourceExhaustedError, tf.errors.InternalError, 
+                       tf.errors.FailedPreconditionError) as e:
+                    print(f"Error in training step: {e}")
+                    raise  # Re-raise to trigger the CPU fallback
 
             epoch_loss = epoch_loss / num_batches
 
@@ -490,7 +561,7 @@ class PINN:
                     self.model.save(f'trainedModels/{self.eq}.keras')
                 except OSError as e:
                     print(f"Error saving model: {e}")
-                    raise
+                    # Continue without failing the whole training
 
         if self.boundary_visualizer is not None:
             self.boundary_visualizer.plot_error_evolution()
