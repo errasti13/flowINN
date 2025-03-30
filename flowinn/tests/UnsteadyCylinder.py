@@ -431,17 +431,31 @@ class UnsteadyCylinder:
 
     def predict(self, use_cpu=False) -> None:
         """
-        Predict flow solution and create animation frames.
-        
-        Args:
-            use_cpu: Whether to force CPU usage (not recommended if trained on GPU)
+        Predict flow solution and create animation frames using GPU.
         """
         try:
+            # Force GPU usage - ignore use_cpu parameter
+            os.environ.pop('CUDA_VISIBLE_DEVICES', None)  # Remove any restrictions
+            
+            import tensorflow as tf
+            # Clear any existing session/graph
+            tf.keras.backend.clear_session()
+            
+            # Set memory growth to avoid OOM errors
+            gpus = tf.config.experimental.list_physical_devices('GPU')
+            if gpus:
+                try:
+                    for gpu in gpus:
+                        tf.config.experimental.set_memory_growth(gpu, True)
+                    print(f"Using GPU: {gpus[0].name}")
+                except RuntimeError as e:
+                    print(f"GPU memory config error: {e}")
+            
             nt = 100  # Number of time steps for visualization
             tPred = np.linspace(self.tRange[0], self.tRange[1], nt)
 
             print("Predicting flow field from ", tPred[0], " to ", tPred[-1])
-            print(f"Device strategy: {'CPU' if use_cpu else 'GPU if available, else CPU'}")
+            print("Using GPU for prediction - no fallbacks to CPU")
 
             # Prepare mesh points
             x_min, x_max = self.xRange
@@ -473,112 +487,108 @@ class UnsteadyCylinder:
                 dist = np.sqrt((X_flat[i] - self.x0)**2 + (Y_flat[i] - self.y0)**2)
                 cylinder_mask[i] = dist <= self.R
             
-            # Process each time step individually to save memory
-            for i, t in enumerate(tPred):
-                print(f"Processing time step {i+1}/{len(tPred)}: t = {t:.4f}")
+            # For GPU stability, process time steps in smaller chunks
+            # to avoid memory issues while staying on GPU
+            chunk_size = 10  # Process this many time steps at once
+            
+            for chunk_start in range(0, len(tPred), chunk_size):
+                chunk_end = min(chunk_start + chunk_size, len(tPred))
+                chunk_tPred = tPred[chunk_start:chunk_end]
                 
-                # Create input tensor for current time
-                time_values = np.full_like(X_flat, t)
-                X_input = np.column_stack([X_flat, Y_flat, time_values])
+                print(f"\nProcessing time chunk {chunk_start//chunk_size + 1}/{(len(tPred)+chunk_size-1)//chunk_size}")
                 
-                # Try to predict with the model on the same device it was trained on
-                try:
-                    # Use model without forcing device change
-                    predictions = self.model.predict(X_input, use_cpu=use_cpu)
-                except Exception as e:
-                    print(f"Error during prediction: {e}")
+                # Process each time step in this chunk
+                for i, t in enumerate(chunk_tPred):
+                    global_i = chunk_start + i
+                    print(f"  Time step {global_i+1}/{len(tPred)}: t = {t:.4f}")
                     
-                    import tensorflow as tf
-                    try:
-                        # Try model saving and reloading approach
-                        print("Trying alternative prediction approach...")
-                        
-                        # Save current model to a temporary file
-                        temp_path = f'temp_{self.problemTag}.keras'
-                        self.model.model.save(temp_path)
-                        
-                        # Clear session
-                        tf.keras.backend.clear_session()
-                        
-                        # Load model and make prediction
-                        # (this will maintain the device placement)
-                        loaded_model = tf.keras.models.load_model(temp_path)
-                        predictions = loaded_model.predict(X_input, verbose=0)
-                        
-                        # Clean up
-                        if os.path.exists(temp_path):
-                            os.remove(temp_path)
-                    except Exception as e2:
-                        print(f"Alternative prediction approach failed: {e2}")
-                        raise RuntimeError(f"Unable to make predictions: {e}. Alternative approach error: {e2}")
+                    # Create input tensor for current time
+                    time_values = np.full_like(X_flat, t)
+                    X_input = np.column_stack([X_flat, Y_flat, time_values])
+                    
+                    # Convert to TensorFlow tensor
+                    X_input_tf = tf.convert_to_tensor(X_input, dtype=tf.float32)
+                    
+                    # Force prediction on GPU - direct model call to avoid any device switching
+                    with tf.device('/device:GPU:0'):
+                        predictions = self.model.model(X_input_tf, training=False).numpy()
+                    
+                    # Extract velocity components and pressure
+                    u = predictions[:, 0].reshape(ny, nx)
+                    v = predictions[:, 1].reshape(ny, nx)
+                    p = predictions[:, 2].reshape(ny, nx)
+                    
+                    # Calculate velocity magnitude for this time step
+                    vel_mag = np.sqrt(u**2 + v**2)
+                    
+                    # Calculate vorticity (curl of velocity field) for this time step
+                    vorticity = self.calculate_vorticity(u, v, x, y)
+                    
+                    # Create mask for cylinder in 2D arrays
+                    mask_2d = cylinder_mask.reshape(ny, nx)
+                    
+                    # Apply mask to fields (set values inside cylinder to NaN for visualization)
+                    u = np.where(mask_2d, np.nan, u)
+                    v = np.where(mask_2d, np.nan, v)
+                    p = np.where(mask_2d, np.nan, p)
+                    vel_mag = np.where(mask_2d, np.nan, vel_mag)
+                    vorticity = np.where(mask_2d, np.nan, vorticity)
+                    
+                    # Plot and save velocity field
+                    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 8))
+                    
+                    # Velocity magnitude plot
+                    cm1 = ax1.pcolormesh(X_mesh, Y_mesh, vel_mag, cmap='viridis', shading='auto')
+                    plt.colorbar(cm1, ax=ax1, label='Velocity Magnitude')
+                    
+                    # Add velocity vectors (subsample for clarity)
+                    skip = 8
+                    ax1.quiver(X_mesh[::skip, ::skip], Y_mesh[::skip, ::skip], 
+                              u[::skip, ::skip], v[::skip, ::skip], 
+                              scale=25, alpha=0.7)
+                    
+                    # Draw cylinder
+                    circle = plt.Circle((self.x0, self.y0), self.R, color='white', fill=True)
+                    ax1.add_patch(circle)
+                    ax1.set_aspect('equal')
+                    ax1.set_title(f'Velocity Field at t = {t:.4f}')
+                    ax1.set_xlabel('x')
+                    ax1.set_ylabel('y')
+                    
+                    # Vorticity plot
+                    cm2 = ax2.pcolormesh(X_mesh, Y_mesh, vorticity, cmap='RdBu_r', 
+                                        shading='auto', vmin=-5, vmax=5)
+                    plt.colorbar(cm2, ax=ax2, label='Vorticity')
+                    
+                    # Draw cylinder on vorticity plot
+                    circle2 = plt.Circle((self.x0, self.y0), self.R, color='black', fill=True)
+                    ax2.add_patch(circle2)
+                    ax2.set_aspect('equal')
+                    ax2.set_title(f'Vorticity at t = {t:.4f}')
+                    ax2.set_xlabel('x')
+                    ax2.set_ylabel('y')
+                    
+                    plt.tight_layout()
+                    
+                    # Save frame
+                    plt.savefig(f'animation_frames/flow_t{global_i:04d}.png', dpi=150)
+                    plt.close()
                 
-                # Extract velocity components and pressure
-                u = predictions[:, 0].reshape(ny, nx)
-                v = predictions[:, 1].reshape(ny, nx)
-                p = predictions[:, 2].reshape(ny, nx)
+                # Free memory between chunks
+                tf.keras.backend.clear_session()
                 
-                # Calculate velocity magnitude for this time step
-                vel_mag = np.sqrt(u**2 + v**2)
-                
-                # Calculate vorticity (curl of velocity field) for this time step
-                vorticity = self.calculate_vorticity(u, v, x, y)
-                
-                # Create mask for cylinder in 2D arrays
-                mask_2d = cylinder_mask.reshape(ny, nx)
-                
-                # Apply mask to fields (set values inside cylinder to NaN for visualization)
-                u = np.where(mask_2d, np.nan, u)
-                v = np.where(mask_2d, np.nan, v)
-                p = np.where(mask_2d, np.nan, p)
-                vel_mag = np.where(mask_2d, np.nan, vel_mag)
-                vorticity = np.where(mask_2d, np.nan, vorticity)
-                
-                # Plot and save velocity field
-                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 8))
-                
-                # Velocity magnitude plot
-                cm1 = ax1.pcolormesh(X_mesh, Y_mesh, vel_mag, cmap='viridis', shading='auto')
-                plt.colorbar(cm1, ax=ax1, label='Velocity Magnitude')
-                
-                # Add velocity vectors (subsample for clarity)
-                skip = 8
-                ax1.quiver(X_mesh[::skip, ::skip], Y_mesh[::skip, ::skip], 
-                          u[::skip, ::skip], v[::skip, ::skip], 
-                          scale=25, alpha=0.7)
-                
-                # Draw cylinder
-                circle = plt.Circle((self.x0, self.y0), self.R, color='white', fill=True)
-                ax1.add_patch(circle)
-                ax1.set_aspect('equal')
-                ax1.set_title(f'Velocity Field at t = {t:.4f}')
-                ax1.set_xlabel('x')
-                ax1.set_ylabel('y')
-                
-                # Vorticity plot
-                cm2 = ax2.pcolormesh(X_mesh, Y_mesh, vorticity, cmap='RdBu_r', 
-                                    shading='auto', vmin=-5, vmax=5)
-                plt.colorbar(cm2, ax=ax2, label='Vorticity')
-                
-                # Draw cylinder on vorticity plot
-                circle2 = plt.Circle((self.x0, self.y0), self.R, color='black', fill=True)
-                ax2.add_patch(circle2)
-                ax2.set_aspect('equal')
-                ax2.set_title(f'Vorticity at t = {t:.4f}')
-                ax2.set_xlabel('x')
-                ax2.set_ylabel('y')
-                
-                plt.tight_layout()
-                
-                # Save frame
-                plt.savefig(f'animation_frames/flow_t{i:04d}.png', dpi=150)
-                plt.close()
+                # Re-initialize model on GPU
+                with tf.device('/device:GPU:0'):
+                    tf.keras.backend.clear_session()
                 
             # Create a simple animation command suggestion
             print("\nTo create an animation from the saved frames, you can use:")
             print("ffmpeg -framerate 10 -i animation_frames/flow_t%04d.png -c:v libx264 -pix_fmt yuv420p cylinder_flow.mp4")
-            
+                
         except Exception as e:
             print(f"Error in prediction: {str(e)}")
+            import traceback
+            traceback.print_exc()
             raise
 
     def calculate_vorticity(self, u, v, x_grid, y_grid):

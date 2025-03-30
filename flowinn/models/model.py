@@ -1,8 +1,8 @@
+import os
+import numpy as np
 import tensorflow as tf
 import matplotlib.pyplot as plt
 from typing import List, Optional, Tuple
-import os
-import numpy as np
 from flowinn.plot.boundary_visualization import BoundaryVisualization
 
 # Custom Fourier Feature Mapping layer
@@ -572,11 +572,11 @@ class PINN:
 
     def predict(self, X, use_cpu=False):
         """
-        Make predictions using the model.
+        Make predictions using the model on GPU.
         
         Args:
             X: Input tensor of shape (..., input_dim)
-            use_cpu: Whether to force CPU usage (not recommended if model was trained on GPU)
+            use_cpu: Parameter is ignored - always uses GPU
             
         Returns:
             Predictions tensor of shape (..., output_dim)
@@ -586,52 +586,83 @@ class PINN:
             X = tf.convert_to_tensor(X, dtype=tf.float32)
             
         try:
-            # The safest approach is to predict on the same device where the model was created
-            if use_cpu:
-                # Only use CPU if explicitly requested (not recommended if trained on GPU)
-                with tf.device('/CPU:0'):
-                    return self.model.predict(X, verbose=0)
-            else:
-                # Use whatever device the model is currently on
-                return self.model.predict(X, verbose=0)
-                
-        except (tf.errors.ResourceExhaustedError, tf.errors.InternalError, 
-                tf.errors.FailedPreconditionError, tf.errors.InvalidArgumentError) as e:
-            print(f"\nError during prediction: {e}")
+            # Direct model call to avoid TF/Keras predict method's device placement issues
+            with tf.device('/device:GPU:0'):
+                return self.model(X, training=False).numpy()
+        except Exception as e:
+            print(f"\nError during GPU prediction: {e}")
             
-            # If we encounter an error, try a different approach that avoids
-            # device placement issues by saving and reloading the model
+            # If we're here, something went wrong with the GPU prediction
+            # Let's try to clean up and retry once more with a fresh session
             try:
-                print("Trying alternative prediction approach...")
-                
-                # Save the model to a temporary file
-                import os
-                temp_path = f"temp_model_{id(self)}.keras"
-                self.model.save(temp_path)
+                print("Trying again with fresh GPU session...")
                 
                 # Clear session
                 tf.keras.backend.clear_session()
                 
-                # Load the model (will maintain device consistency)
-                loaded_model = tf.keras.models.load_model(temp_path)
-                predictions = loaded_model.predict(X, verbose=0)
+                # Configure memory growth
+                gpus = tf.config.experimental.list_physical_devices('GPU')
+                if gpus:
+                    for gpu in gpus:
+                        tf.config.experimental.set_memory_growth(gpu, True)
                 
-                # Clean up
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
-                    
-                return predictions
+                # Retry direct model call on GPU
+                with tf.device('/device:GPU:0'):
+                    preds = self.model(X, training=False).numpy()
+                return preds
                 
             except Exception as e2:
-                print(f"Alternative prediction approach failed: {e2}")
-                raise RuntimeError(f"Failed to make predictions. Original error: {e}\nSecond error: {e2}")
+                print(f"Second GPU prediction attempt also failed: {e2}")
+                raise RuntimeError(f"Unable to make predictions on GPU. Please check your CUDA/cuDNN setup.")
 
     def load(self, model_name: str) -> None:
+        """
+        Load a model from disk.
+        
+        Args:
+            model_name: Name of the model to load (without extension)
+        """
+        # Import os here to ensure it's available
+        import os
+        
         filepath: str = f'trainedModels/{model_name}.keras'
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"The specified file does not exist: {filepath}")
         try:
+            # Try to load the model
+            print(f"Loading model from {filepath}")
             self.model = tf.keras.models.load_model(filepath)
-            print(f"Model successfully loaded from {filepath}")
+            print(f"Model successfully loaded")
+            
+            # Update input_dim from loaded model
+            self.input_dim = self.model.input_shape[-1]
         except Exception as e:
-            raise RuntimeError(f"Error loading model from {filepath}: {e}")
+            print(f"Error loading model: {e}")
+            print("Trying to load with CPU-only...")
+            
+            # Clear session
+            tf.keras.backend.clear_session()
+            
+            # Force CPU usage
+            old_cuda = os.environ.get('CUDA_VISIBLE_DEVICES', None)
+            os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+            
+            try:
+                with tf.device('/CPU:0'):
+                    self.model = tf.keras.models.load_model(filepath)
+                print(f"Model successfully loaded on CPU")
+                
+                # Update input_dim from loaded model
+                self.input_dim = self.model.input_shape[-1]
+                
+                # Restore original CUDA setting
+                if old_cuda is not None:
+                    os.environ['CUDA_VISIBLE_DEVICES'] = old_cuda
+                elif 'CUDA_VISIBLE_DEVICES' in os.environ:
+                    del os.environ['CUDA_VISIBLE_DEVICES']
+            except Exception as e2:
+                if old_cuda is not None:
+                    os.environ['CUDA_VISIBLE_DEVICES'] = old_cuda
+                elif 'CUDA_VISIBLE_DEVICES' in os.environ:
+                    del os.environ['CUDA_VISIBLE_DEVICES']
+                raise RuntimeError(f"Failed to load model: {e2}")
