@@ -16,7 +16,7 @@ def main():
     nx = 200
     ny = 200
     n_boundary = 100
-    num_batches = 5
+    num_batches = 1
 
     trainedModel = False
     
