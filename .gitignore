@@ -122,3 +122,11 @@ model.ckpt.*
 build/
 dist/
 *.egg-info/
+
+**/*.mp4
+**/*.gif
+**/*.png
+**/*.jpg
+**/*.jpeg
+**/*.webp
+**/*.svg
