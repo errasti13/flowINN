@@ -612,11 +612,11 @@ class PINN:
 
     def predict(self, X, use_cpu=False):
         """
-        Make predictions using the model on GPU.
+        Make predictions using the model.
         
         Args:
             X: Input tensor of shape (..., input_dim)
-            use_cpu: Parameter is ignored - always uses GPU
+            use_cpu: Whether to force CPU usage for prediction
             
         Returns:
             Predictions tensor of shape (..., output_dim)
@@ -624,32 +624,118 @@ class PINN:
         # Convert input to tensor if it's numpy array
         if isinstance(X, np.ndarray):
             X = tf.convert_to_tensor(X, dtype=tf.float32)
+        
+        # Choose device based on parameter and availability
+        try:
+            if use_cpu:
+                with tf.device('/CPU:0'):
+                    return self.model(X, training=False).numpy()
+            else:
+                return self.model(X, training=False).numpy()
+        except (tf.errors.ResourceExhaustedError, tf.errors.InternalError, 
+               tf.errors.FailedPreconditionError) as e:
+            print(f"GPU error during prediction: {e}")
+            print("Falling back to CPU for prediction...")
             
-        # Direct model call for GPU prediction
-        with tf.device('/device:GPU:0'):
-            return self.model(X, training=False).numpy()
+            with tf.device('/CPU:0'):
+                return self.model(X, training=False).numpy()
+
+    def save(self, model_name: str) -> None:
+        """
+        Save the model to disk with metadata.
+        
+        Args:
+            model_name: Name or path for the saved model (without extension)
+        """
+        try:
+            # Ensure we're saving to the trainedModels directory
+            if not model_name.startswith('trainedModels/'):
+                save_path = f"trainedModels/{model_name}"
+            else:
+                save_path = model_name
+                
+            # Create directory if it doesn't exist
+            os.makedirs('trainedModels', exist_ok=True)
+                
+            # Clean up path for saving
+            if not save_path.endswith('.keras') and not save_path.endswith('.h5'):
+                save_path = f"{save_path}.keras"
+            
+            # Save the underlying Keras model
+            self.model.save(save_path)
+            
+            # Save additional metadata that isn't captured by Keras save
+            metadata = {
+                'activation': self.activation,
+                'learning_rate': self.learning_rate,
+                'input_dim': self.input_dim,
+                'eq': self.eq,
+                'architecture_type': 'pinn',
+                'model_version': '1.0'
+            }
+            
+            # Save metadata to a JSON file
+            metadata_path = f"{save_path.rsplit('.', 1)[0]}_metadata.json"
+            with open(metadata_path, 'w') as f:
+                import json
+                json.dump(metadata, f, indent=2)
+                
+            print(f"Model successfully saved to {save_path}")
+            print(f"Model metadata saved to {metadata_path}")
+            return True
+        except Exception as e:
+            print(f"Error saving model: {str(e)}")
+            return False
 
     def load(self, model_name: str) -> None:
         """
-        Load a model from disk.
+        Load a model from disk with metadata.
         
         Args:
             model_name: Name of the model to load (without extension)
         """
         # Import os here to ensure it's available
         import os
+        import json
         
-        filepath: str = f'trainedModels/{model_name}.keras'
+        # Determine file paths
+        filepath = f'trainedModels/{model_name}.keras'
+        metadata_path = f'trainedModels/{model_name}_metadata.json'
+        
         if not os.path.exists(filepath):
-            raise FileNotFoundError(f"The specified file does not exist: {filepath}")
+            raise FileNotFoundError(f"The specified model file does not exist: {filepath}")
+        
         try:
             # Try to load the model
             print(f"Loading model from {filepath}")
-            self.model = tf.keras.models.load_model(filepath)
+            self.model = tf.keras.models.load_model(filepath, compile=False)
+            
+            # Load metadata if available
+            if os.path.exists(metadata_path):
+                try:
+                    with open(metadata_path, 'r') as f:
+                        metadata = json.load(f)
+                    
+                    # Update object attributes from metadata
+                    self.activation = metadata.get('activation', self.activation)
+                    self.learning_rate = metadata.get('learning_rate', self.learning_rate)
+                    self.input_dim = metadata.get('input_dim', self.model.input_shape[-1])
+                    self.eq = metadata.get('eq', model_name)
+                    
+                    print(f"Model metadata loaded from {metadata_path}")
+                except Exception as e:
+                    print(f"Warning: Could not load metadata: {e}")
+            else:
+                # Update input_dim from loaded model if no metadata
+                self.input_dim = self.model.input_shape[-1]
+                print("No metadata file found. Using basic model information.")
+            
+            # Always recompile the optimizer to ensure it's properly initialized
+            self.optimizer = tf.keras.optimizers.Adam(
+                learning_rate=self.learning_rate_schedule(self.learning_rate))
+            
             print(f"Model successfully loaded")
             
-            # Update input_dim from loaded model
-            self.input_dim = self.model.input_shape[-1]
         except Exception as e:
             print(f"Error loading model: {e}")
             print("Trying to load with CPU-only...")
@@ -663,11 +749,33 @@ class PINN:
             
             try:
                 with tf.device('/CPU:0'):
-                    self.model = tf.keras.models.load_model(filepath)
-                print(f"Model successfully loaded on CPU")
+                    self.model = tf.keras.models.load_model(filepath, compile=False)
                 
-                # Update input_dim from loaded model
-                self.input_dim = self.model.input_shape[-1]
+                # Load metadata if available
+                if os.path.exists(metadata_path):
+                    try:
+                        with open(metadata_path, 'r') as f:
+                            metadata = json.load(f)
+                        
+                        # Update object attributes from metadata
+                        self.activation = metadata.get('activation', self.activation)
+                        self.learning_rate = metadata.get('learning_rate', self.learning_rate)
+                        self.input_dim = metadata.get('input_dim', self.model.input_shape[-1])
+                        self.eq = metadata.get('eq', model_name)
+                        
+                        print(f"Model metadata loaded from {metadata_path}")
+                    except Exception as e:
+                        print(f"Warning: Could not load metadata: {e}")
+                else:
+                    # Update input_dim from loaded model if no metadata
+                    self.input_dim = self.model.input_shape[-1]
+                    print("No metadata file found. Using basic model information.")
+                
+                # Always recompile the optimizer to ensure it's properly initialized
+                self.optimizer = tf.keras.optimizers.Adam(
+                    learning_rate=self.learning_rate_schedule(self.learning_rate))
+                
+                print(f"Model successfully loaded on CPU")
                 
                 # Restore original CUDA setting
                 if old_cuda is not None:
@@ -680,29 +788,3 @@ class PINN:
                 elif 'CUDA_VISIBLE_DEVICES' in os.environ:
                     del os.environ['CUDA_VISIBLE_DEVICES']
                 raise RuntimeError(f"Failed to load model: {e2}")
-
-    def save(self, model_name: str) -> None:
-        """
-        Save the model to disk.
-        
-        Args:
-            model_name: Name or path for the saved model (without extension)
-        """
-        try:
-            # Create directory if it doesn't exist
-            dir_path = os.path.dirname(model_name)
-            if dir_path and not os.path.exists(dir_path):
-                os.makedirs(dir_path, exist_ok=True)
-                
-            # Clean up path for saving
-            save_path = model_name
-            if not save_path.endswith('.keras') and not save_path.endswith('.h5'):
-                save_path = f"{save_path}.keras"
-                
-            # Save the underlying Keras model
-            self.model.save(save_path)
-            print(f"Model successfully saved to {save_path}")
-            return True
-        except Exception as e:
-            print(f"Error saving model: {str(e)}")
-            return False
