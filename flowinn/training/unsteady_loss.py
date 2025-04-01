@@ -15,6 +15,22 @@ class UnsteadyNavierStokesLoss(NavierStokesBaseLoss):
     def physics_loss(self):
         return self._physics_loss
 
+    def __call__(self, batch_data=None):
+        """
+        Make the loss function callable directly.
+        
+        This enables the loss object to be used directly as a function:
+        loss_obj(batch_data) instead of loss_obj.loss_function(batch_data)
+        
+        Args:
+            batch_data: Batch of input data for the model
+            
+        Returns:
+            Total loss value
+        """
+        return self.loss_function(batch_data)
+
+    @tf.function
     def loss_function(self, batch_data=None):
         """Compute combined physics and boundary condition losses"""
         # Get coordinates based on dimension
@@ -28,20 +44,30 @@ class UnsteadyNavierStokesLoss(NavierStokesBaseLoss):
             x, y, t = tf.split(batch_data, num_or_size_splits=3, axis=-1)
             coords = [x, y, t]
 
+        # Convert all inputs to tensors
+        coords = [tf.convert_to_tensor(c, dtype=tf.float32) for c in coords]
         total_loss = 0.0
 
-        # Compute physics loss
+        # Compute physics loss with a single tape
         with tf.GradientTape(persistent=True) as tape:
             for coord in coords:
                 tape.watch(coord)
             
             input_tensor = tf.concat(coords, axis=1)
-            predictions = self.model.model(input_tensor)
+            predictions = self.model.model(input_tensor, training=True)
             
-            physics_loss = self.compute_physics_loss(predictions, coords, tape)
+            # Split predictions for physics loss
+            velocities = predictions[:, :2]
+            pressure = predictions[:, 2]
+            
+            # Get residuals outside tape context
+            residuals = self._physics_loss.get_residuals(velocities, pressure, coords, tape)
+            
+            # Compute physics loss
+            physics_loss = tf.reduce_mean([tf.reduce_mean(tf.square(r)) for r in residuals])
             total_loss += self.physicsWeight * physics_loss
 
-        # Compute boundary losses
+        # Compute boundary losses with separate tape for efficiency
         boundary_loss = 0.0
         for boundary_name, boundary_data in self.mesh.boundaries.items():
             try:
@@ -54,13 +80,13 @@ class UnsteadyNavierStokesLoss(NavierStokesBaseLoss):
                 bc_type = boundary_data['bc_type']
                 conditions = boundary_data['conditions']
 
-                # Apply boundary conditions
+                # Apply boundary conditions with fresh tape
                 with tf.GradientTape(persistent=True) as bc_tape:
                     for coord in bc_coords:
                         bc_tape.watch(coord)
                     
                     bc_input = tf.concat(bc_coords, axis=1)
-                    bc_pred = self.model.model(bc_input)
+                    bc_pred = self.model.model(bc_input, training=True)
                     
                     # Split predictions into velocities and pressure
                     vel_pred = bc_pred[:, :-1]
