@@ -14,14 +14,15 @@ class UnsteadyNavierStokes2D(NavierStokes):
         """
         self.Re = Re
 
+    @tf.function
     def get_residuals(self, velocities: tf.Tensor, pressure: tf.Tensor, coords: list, tape) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
         """
-        Calculate 2D Steady Navier-Stokes residuals.
+        Calculate 2D Unsteady Navier-Stokes residuals.
         
         Args:
             velocities: Tensor of velocity components [u, v]
             pressure: Pressure tensor
-            coords: List of coordinate tensors [x, y]
+            coords: List of coordinate tensors [x, y, t]
             tape: Gradient tape for automatic differentiation
             
         Returns:
@@ -31,9 +32,6 @@ class UnsteadyNavierStokes2D(NavierStokes):
         u = velocities[:, 0]
         v = velocities[:, 1]
         p = tf.reshape(pressure, [-1])
-        
-        # Watch coordinates for automatic differentiation
-        tape.watch([x, y, t])
         
         # First derivatives
         [u_x, u_y, u_t, v_x, v_y, v_t, p_x, p_y, p_t] = self._compute_first_derivatives(
@@ -50,17 +48,25 @@ class UnsteadyNavierStokes2D(NavierStokes):
         momentum_x = ( u_t +
             u * u_x + v * u_y +
             p_x -
-            1 / self.Re * (u_xx + u_yy)  # Corrected ν to 1/Re
+            1 / self.Re * (u_xx + u_yy)
         )
         
         momentum_y = ( v_t +
             u * v_x + v * v_y +
             p_y  -
-            1 / self.Re * (v_xx + v_yy)  # Corrected ν to 1/Re
+            1 / self.Re * (v_xx + v_yy)
         )
 
-        continuity = tf.reshape(continuity, [-1])
-        momentum_x = tf.reshape(momentum_x, [-1])
-        momentum_y = tf.reshape(momentum_y, [-1])
+        return (
+            tf.reshape(continuity, [-1]),
+            tf.reshape(momentum_x, [-1]),
+            tf.reshape(momentum_y, [-1])
+        )
 
-        return continuity, momentum_x, momentum_y
+    @tf.function
+    def _compute_first_derivatives(self, variables, coords, tape):
+        return super()._compute_first_derivatives(variables, coords, tape)
+
+    @tf.function
+    def _compute_second_derivatives(self, first_derivs, coords, tape):
+        return super()._compute_second_derivatives(first_derivs, coords, tape)
