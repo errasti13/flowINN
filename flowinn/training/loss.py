@@ -31,6 +31,9 @@ class NavierStokesLoss:
             class CallableLoss:
                 def __init__(self, loss_obj):
                     self.loss_obj = loss_obj
+                    # Expose loss_function method directly
+                    if hasattr(loss_obj, 'loss_function'):
+                        self.loss_function = loss_obj.loss_function
                     
                 def __call__(self, batch_data=None):
                     if hasattr(self.loss_obj, 'loss_function'):
