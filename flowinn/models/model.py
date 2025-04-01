@@ -4,56 +4,7 @@ import tensorflow as tf
 import matplotlib.pyplot as plt
 from typing import List, Optional, Tuple
 from flowinn.plot.boundary_visualization import BoundaryVisualization
-
-# Custom Fourier Feature Mapping layer
-class FourierFeatureMapping(tf.keras.layers.Layer):
-    def __init__(self, mapping_size: int = 64, scale: float = 10.0, temporal_scale: float = None, **kwargs):
-        """
-        Args:
-            mapping_size (int): The number of random Fourier features.
-            scale (float): Scale factor for the random weights.
-            temporal_scale (float): Optional separate scale for temporal dimension.
-                                   If None, uses the same scale for all dimensions.
-        """
-        super(FourierFeatureMapping, self).__init__(**kwargs)
-        self.mapping_size = mapping_size
-        self.scale = scale
-        self.temporal_scale = temporal_scale
-
-    def build(self, input_shape):
-        # Create a fixed random projection matrix (non-trainable)
-        if self.temporal_scale is not None and input_shape[-1] >= 3:
-            # For space-time problems, use different scales for spatial and temporal dimensions
-            # Create a diagonal matrix with different scales
-            scales = tf.ones(input_shape[-1], dtype=tf.float32)
-            # Set temporal dimension (assuming it's the last one) to have different scale
-            scales = tf.tensor_scatter_nd_update(scales, [[input_shape[-1]-1]], [self.temporal_scale/self.scale])
-            
-            # Create random weights with proper scaling applied per dimension
-            B_init = tf.random_normal_initializer(stddev=1.0)(shape=(input_shape[-1], self.mapping_size))
-            # Apply the scaling factors to each dimension
-            B_init = tf.einsum('i,ij->ij', scales, B_init) * self.scale
-            
-            self.B = self.add_weight(
-                name='B',
-                shape=(input_shape[-1], self.mapping_size),
-                initializer=lambda *args, **kwargs: B_init,
-                trainable=False
-            )
-        else:
-            # Use the original implementation for non-temporal problems
-            self.B = self.add_weight(
-                name='B',
-                shape=(input_shape[-1], self.mapping_size),
-                initializer=tf.random_normal_initializer(stddev=self.scale),
-                trainable=False
-            )
-        super(FourierFeatureMapping, self).build(input_shape)
-
-    def call(self, inputs):
-        x_proj = tf.matmul(inputs, self.B)
-        # Concatenate sine and cosine features
-        return tf.concat([tf.sin(x_proj), tf.cos(x_proj)], axis=-1)
+from flowinn.nn.architectures import FourierFeatureLayer
 
 class PINN:
     """
@@ -110,14 +61,19 @@ class PINN:
         if is_unsteady:
             # For unsteady problems, use a different scale for temporal dimension
             # Higher scale (5.0) for time dimension to better capture high-frequency oscillations
-            model.add(FourierFeatureMapping(
-                mapping_size=64,  # More features for complex temporal dynamics
+            model.add(FourierFeatureLayer(
+                fourier_dim=64,  # More features for complex temporal dynamics
                 scale=5.0,       # Lower overall scale for spatial dimensions
-                temporal_scale=25.0  # Higher scale for temporal dimension
+                temporal_scale=25.0,  # Higher scale for temporal dimension
+                trainable=False   # Keep features fixed for stability
             ))
         else:
             # For steady problems, use standard Fourier features
-            model.add(FourierFeatureMapping(mapping_size=32, scale=10.0))
+            model.add(FourierFeatureLayer(
+                fourier_dim=32, 
+                scale=10.0,
+                trainable=False
+            ))
         
         # Follow with hidden Dense layers
         for i, units in enumerate(layers):
@@ -131,6 +87,7 @@ class PINN:
                 activation=activation,
                 kernel_initializer=tf.keras.initializers.GlorotNormal()
             ))
+            model.add(tf.keras.layers.BatchNormalization())
             
         # Final output layer
         model.add(tf.keras.layers.Dense(output_shape))
@@ -399,7 +356,7 @@ class PINN:
               airfoil_coords: Optional[Tuple[np.ndarray, np.ndarray]] = None,
               output_dir: str = 'bc_plots', patience: int = 10000, min_delta: float = 1e-6,
               time_window_size: int = 5, add_noise: bool = True, noise_level: float = 0.01,
-              use_cpu: bool = False) -> None:
+              use_cpu: bool = False, batch_data: Optional[List[tf.Tensor]] = None) -> None:
         """
         Train the model using the provided loss function.
         
@@ -407,7 +364,7 @@ class PINN:
             loss_function: Loss function to optimize
             mesh: Mesh containing the domain discretization
             epochs: Number of training epochs
-            num_batches: Number of batches per epoch
+            num_batches: Number of batches per epoch (ignored if batch_data is provided)
             print_interval: Interval for printing progress
             autosave_interval: Interval for model autosaving
             plot_loss: Whether to plot loss during training
@@ -421,27 +378,28 @@ class PINN:
             add_noise: Whether to add small noise to training points
             noise_level: Level of noise to add (fraction of domain range)
             use_cpu: Force CPU usage (set to True if GPU/CUDA errors occur)
+            batch_data: Pre-generated batches for memory-efficient training
         """
         # Set device strategy based on use_cpu flag or auto-detect issues
         if use_cpu:
             print("Using CPU for training (GPU disabled)")
             with tf.device('/CPU:0'):
-                self._train_implementation(
+                return self._train_implementation(
                     loss_function, mesh, epochs, num_batches, 
                     print_interval, autosave_interval, plot_loss, 
                     bc_plot_interval, domain_range, airfoil_coords, 
                     output_dir, patience, min_delta, time_window_size, 
-                    add_noise, noise_level
+                    add_noise, noise_level, batch_data
                 )
         else:
             try:
                 # Try with default device
-                self._train_implementation(
+                return self._train_implementation(
                     loss_function, mesh, epochs, num_batches, 
                     print_interval, autosave_interval, plot_loss, 
                     bc_plot_interval, domain_range, airfoil_coords, 
                     output_dir, patience, min_delta, time_window_size, 
-                    add_noise, noise_level
+                    add_noise, noise_level, batch_data
                 )
             except (tf.errors.ResourceExhaustedError, tf.errors.InternalError, 
                    tf.errors.FailedPreconditionError) as e:
@@ -472,58 +430,109 @@ class PINN:
                 
                 # Run on CPU
                 with tf.device('/CPU:0'):
-                    self._train_implementation(
+                    return self._train_implementation(
                         loss_function, mesh, epochs, num_batches, 
                         print_interval, autosave_interval, plot_loss, 
                         bc_plot_interval, domain_range, airfoil_coords, 
                         output_dir, patience, min_delta, time_window_size, 
-                        add_noise, noise_level
+                        add_noise, noise_level, batch_data
                     )
 
     def _train_implementation(self, loss_function, mesh, epochs, num_batches,
                           print_interval, autosave_interval, plot_loss, 
                           bc_plot_interval, domain_range, airfoil_coords,
                           output_dir, patience, min_delta, time_window_size, 
-                          add_noise, noise_level):
+                          add_noise, noise_level, batch_data=None):
         """Implementation of the training process, separated for device context management."""
+        import time
+        
         loss_history = []
         epoch_history = []
+        time_history = []  # Track time per epoch
         last_loss = float('inf')
         patience_counter = 0
+        total_training_time = 0.0
 
         if bc_plot_interval is not None:
             self.boundary_visualizer = BoundaryVisualization(output_dir=output_dir)
 
         if plot_loss:
             plt.ion()
-            fig, ax = plt.subplots()
-            ax.set_xlabel('Epoch')
-            ax.set_ylabel('Loss')
-            ax.yaxis.get_major_formatter().set_useOffset(False)
-            ax.yaxis.get_major_formatter().set_scientific(False)
-            line, = ax.semilogy([], [], label='Training Loss')
-            plt.legend()
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
+            ax1.set_xlabel('Epoch')
+            ax1.set_ylabel('Loss')
+            ax1.yaxis.get_major_formatter().set_useOffset(False)
+            ax1.yaxis.get_major_formatter().set_scientific(False)
+            line1, = ax1.semilogy([], [], label='Training Loss')
+            ax1.legend()
+            
+            ax2.set_xlabel('Epoch')
+            ax2.set_ylabel('Time per Epoch (s)')
+            line2, = ax2.plot([], [], label='Time/Epoch')
+            ax2.legend()
 
         for epoch in range(epochs):
-            batches = self.generate_batches(
-                mesh, 
-                num_batches, 
-                time_window_size=time_window_size,
-                add_noise=add_noise,
-                noise_level=noise_level
-            )
-            epoch_loss = 0.0
-            
-            for batch_data in batches:
-                try:
-                    batch_loss = self.train_step(loss_function, batch_data)
-                    epoch_loss += batch_loss
-                except (tf.errors.ResourceExhaustedError, tf.errors.InternalError, 
-                       tf.errors.FailedPreconditionError) as e:
-                    print(f"Error in training step: {e}")
-                    raise  # Re-raise to trigger the CPU fallback
+            epoch_start_time = time.time()
+            try:
+                # Generate or use provided batches
+                if batch_data is not None and len(batch_data) > 0:
+                    # Use pre-generated batches (memory efficient)
+                    batches = batch_data
+                    # Shuffle batches for each epoch
+                    np.random.shuffle(batches)
+                else:
+                    # Generate batches on-the-fly
+                    batches = self.generate_batches(
+                        mesh, 
+                        num_batches, 
+                        time_window_size=time_window_size,
+                        add_noise=add_noise,
+                        noise_level=noise_level
+                    )
+                
+                # Train on batches
+                epoch_loss = 0.0
+                for batch_idx, batch in enumerate(batches):
+                    try:
+                        # Process in smaller chunks if batch is large
+                        if batch.shape[0] > 5000:
+                            sub_batch_size = 2500  # Smaller sub-batches for memory efficiency
+                            num_sub_batches = (batch.shape[0] + sub_batch_size - 1) // sub_batch_size
+                            
+                            sub_batch_loss = 0.0
+                            for i in range(num_sub_batches):
+                                start_idx = i * sub_batch_size
+                                end_idx = min(start_idx + sub_batch_size, batch.shape[0])
+                                sub_batch = batch[start_idx:end_idx]
+                                
+                                batch_loss = self.train_step(loss_function, sub_batch)
+                                sub_batch_loss += batch_loss.numpy() * (end_idx - start_idx) / batch.shape[0]
+                                
+                                # Explicitly release memory
+                                tf.keras.backend.clear_session()
+                                import gc
+                                gc.collect()
+                                
+                            epoch_loss += sub_batch_loss
+                        else:
+                            # Process smaller batches normally
+                            batch_loss = self.train_step(loss_function, batch)
+                            epoch_loss += batch_loss.numpy() / len(batches)
+                            
+                    except (tf.errors.ResourceExhaustedError, tf.errors.InternalError,
+                           tf.errors.FailedPreconditionError) as e:
+                        print(f"Error in batch {batch_idx+1}/{len(batches)}: {e}")
+                        print("Skipping batch and continuing...")
+                        # Continue with next batch instead of failing completely
+                        continue
+                
+            except Exception as e:
+                print(f"Error in epoch {epoch + 1}: {e}")
+                raise
 
-            epoch_loss = epoch_loss / num_batches
+            # Calculate epoch time and update total
+            epoch_time = time.time() - epoch_start_time
+            total_training_time += epoch_time
 
             # Early stopping check
             if epoch_loss < last_loss - min_delta:
@@ -532,23 +541,35 @@ class PINN:
                 patience_counter += 1
                 if patience_counter >= patience:
                     print(f"\nEarly stopping triggered after {epoch + 1} epochs")
+                    print(f"Total training time: {total_training_time:.2f}s")
+                    print(f"Average time per epoch: {total_training_time/(epoch+1):.2f}s")
                     break
             
             last_loss = epoch_loss
 
             if (epoch + 1) % print_interval == 0:
-                loss_history.append(epoch_loss.numpy())
+                loss_history.append(epoch_loss)
                 epoch_history.append(epoch + 1)
+                time_history.append(epoch_time)
+                avg_time = total_training_time / (epoch + 1)
 
                 if plot_loss:
-                    line.set_xdata(epoch_history)
-                    line.set_ydata(loss_history)
-                    ax.relim()
-                    ax.autoscale_view()
+                    # Update loss plot
+                    line1.set_xdata(epoch_history)
+                    line1.set_ydata(loss_history)
+                    ax1.relim()
+                    ax1.autoscale_view()
+                    
+                    # Update timing plot
+                    line2.set_xdata(epoch_history)
+                    line2.set_ydata(time_history)
+                    ax2.relim()
+                    ax2.autoscale_view()
+                    
                     plt.draw()
                     plt.pause(0.001)
 
-                print(f"Epoch {epoch + 1}: Loss = {epoch_loss.numpy()}")
+                print(f"Epoch {epoch + 1}: Loss = {epoch_loss:.6f}, Time = {epoch_time:.2f}s, Avg Time = {avg_time:.2f}s")
             
             if self.boundary_visualizer is not None and bc_plot_interval is not None and (epoch + 1) % bc_plot_interval == 0:
                 self.boundary_visualizer.plot_boundary_conditions(
@@ -563,12 +584,31 @@ class PINN:
                     print(f"Error saving model: {e}")
                     # Continue without failing the whole training
 
+        # Print final timing statistics
+        if epoch > 0:  # Only if we completed at least one epoch
+            print(f"\nTraining completed:")
+            print(f"Total training time: {total_training_time:.2f}s")
+            print(f"Average time per epoch: {total_training_time/(epoch+1):.2f}s")
+            print(f"Min epoch time: {min(time_history):.2f}s")
+            print(f"Max epoch time: {max(time_history):.2f}s")
+
         if self.boundary_visualizer is not None:
             self.boundary_visualizer.plot_error_evolution()
 
         if plot_loss:
             plt.ioff()
             plt.close()
+            
+        # Create a history object to return with timing information
+        history = type('History', (), {
+            'history': {
+                'loss': loss_history,
+                'time_per_epoch': time_history,
+                'total_time': total_training_time,
+                'avg_time_per_epoch': total_training_time/(epoch+1) if epoch > 0 else 0
+            }
+        })
+        return history
 
     def predict(self, X, use_cpu=False):
         """
@@ -585,35 +625,9 @@ class PINN:
         if isinstance(X, np.ndarray):
             X = tf.convert_to_tensor(X, dtype=tf.float32)
             
-        try:
-            # Direct model call to avoid TF/Keras predict method's device placement issues
-            with tf.device('/device:GPU:0'):
-                return self.model(X, training=False).numpy()
-        except Exception as e:
-            print(f"\nError during GPU prediction: {e}")
-            
-            # If we're here, something went wrong with the GPU prediction
-            # Let's try to clean up and retry once more with a fresh session
-            try:
-                print("Trying again with fresh GPU session...")
-                
-                # Clear session
-                tf.keras.backend.clear_session()
-                
-                # Configure memory growth
-                gpus = tf.config.experimental.list_physical_devices('GPU')
-                if gpus:
-                    for gpu in gpus:
-                        tf.config.experimental.set_memory_growth(gpu, True)
-                
-                # Retry direct model call on GPU
-                with tf.device('/device:GPU:0'):
-                    preds = self.model(X, training=False).numpy()
-                return preds
-                
-            except Exception as e2:
-                print(f"Second GPU prediction attempt also failed: {e2}")
-                raise RuntimeError(f"Unable to make predictions on GPU. Please check your CUDA/cuDNN setup.")
+        # Direct model call for GPU prediction
+        with tf.device('/device:GPU:0'):
+            return self.model(X, training=False).numpy()
 
     def load(self, model_name: str) -> None:
         """
@@ -666,3 +680,29 @@ class PINN:
                 elif 'CUDA_VISIBLE_DEVICES' in os.environ:
                     del os.environ['CUDA_VISIBLE_DEVICES']
                 raise RuntimeError(f"Failed to load model: {e2}")
+
+    def save(self, model_name: str) -> None:
+        """
+        Save the model to disk.
+        
+        Args:
+            model_name: Name or path for the saved model (without extension)
+        """
+        try:
+            # Create directory if it doesn't exist
+            dir_path = os.path.dirname(model_name)
+            if dir_path and not os.path.exists(dir_path):
+                os.makedirs(dir_path, exist_ok=True)
+                
+            # Clean up path for saving
+            save_path = model_name
+            if not save_path.endswith('.keras') and not save_path.endswith('.h5'):
+                save_path = f"{save_path}.keras"
+                
+            # Save the underlying Keras model
+            self.model.save(save_path)
+            print(f"Model successfully saved to {save_path}")
+            return True
+        except Exception as e:
+            print(f"Error saving model: {str(e)}")
+            return False
