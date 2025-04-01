@@ -9,7 +9,6 @@ as the backbone for PINNs, including:
 
 import tensorflow as tf
 from tensorflow.keras import layers, Model, initializers
-from flowinn.models.model import PINN
 
 
 class FourierFeatureLayer(layers.Layer):
@@ -156,6 +155,9 @@ def create_mfn_model(input_shape, output_shape, eq, activation='gelu', fourier_d
     if layer_sizes is None:
         layer_sizes = [128, 128, 128, 128]
     
+    # Import PINN here to avoid circular import
+    from flowinn.models.model import PINN
+    
     # Create a standard PINN model
     pinn_model = PINN(
         input_shape=input_shape,
@@ -198,12 +200,6 @@ def create_mfn_model(input_shape, output_shape, eq, activation='gelu', fourier_d
     
     # Create model
     mfn_model = Model(inputs=input_layer, outputs=output_layer)
-    
-    # Use float32 precision for better performance
-    mfn_model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
-        loss='mse'
-    )
     
     # Replace the default model in PINN with our MFN
     pinn_model.model = mfn_model
