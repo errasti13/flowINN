@@ -7,12 +7,16 @@ def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Unsteady Cylinder Flow Simulation')
     parser.add_argument('--epochs', type=int, default=100, help='Number of training epochs')
-    parser.add_argument('--print-interval', type=int, default=100, help='Print interval during training')
+    parser.add_argument('--print-interval', type=int, default=1, help='Print interval during training')
     parser.add_argument('--autosave-interval', type=int, default=1000, help='Model autosave interval')
-    parser.add_argument('--num-batches', type=int, default=2, help='Number of batches per epoch')
+    parser.add_argument('--num-batches', type=int, default=4, help='Number of batches per epoch')
     parser.add_argument('--use-cpu', action='store_true', help='Force CPU usage for training')
     parser.add_argument('--load-model', action='store_true', help='Load pre-trained model')
     parser.add_argument('--predict-only', action='store_true', help='Skip training and only run prediction')
+    parser.add_argument('--spatial-batches', type=int, default=1, help='Number of spatial batches')
+    parser.add_argument('--temporal-batches', type=int, default=1, help='Number of temporal batches')
+    parser.add_argument('--architecture', choices=['mlp', 'mfn', 'fast_mfn'], default='mfn',
+                       help='Neural network architecture to use')
     
     args = parser.parse_args()
     
@@ -28,28 +32,31 @@ def main():
     autosave_interval = args.autosave_interval
     num_batches = args.num_batches
     use_cpu = args.use_cpu
+    architecture = args.architecture
     
-    # Mesh parameters
+    # Memory management parameters
+    spatial_batches = args.spatial_batches
+    temporal_batches = args.temporal_batches
+
     nx = 70
     ny = 70
-    nt = 150              # Increased time discretization for better capture of vortex shedding
+    nt = 50
+    
     n_boundary = 300
     
     if use_cpu:
         print("\n*** USING CPU FOR TRAINING (GPU DISABLED) ***")
     
     try:
-        # Configure GPU memory growth to avoid OOM errors
-        gpus = tf.config.experimental.list_physical_devices('GPU')
-        if gpus:
-            for gpu in gpus:
-                tf.config.experimental.set_memory_growth(gpu, True)
-            print(f"GPU device found: {gpus[0].name}")
-        else:
-            print("No GPU devices found")
-        
         # Initialize cylinder flow
-        cylinder = UnsteadyCylinder(case_name, x_range, y_range, t_range)
+        print(f"\nInitializing UnsteadyCylinder with {architecture} architecture...")
+            
+        cylinder = UnsteadyCylinder(
+            case_name, 
+            x_range, y_range, t_range,
+            activation='gelu',
+            architecture=architecture
+        )
         
         # Generate mesh
         print("Generating mesh...")
@@ -68,20 +75,25 @@ def main():
                 print_interval=print_interval,
                 autosaveInterval=autosave_interval,
                 num_batches=num_batches,
-                use_cpu=use_cpu
+                use_cpu=use_cpu,
+                num_spatial_batches=spatial_batches,
+                num_temporal_batches=temporal_batches
             )
             
             # Save model after training
             print("Training complete, saving model...")
-            os.makedirs('trainedModels', exist_ok=True)
-            cylinder.model.model.save(f'trainedModels/{case_name}.keras')
+            cylinder.save_model()
         
-        # Clear session before prediction to start fresh
-        tf.keras.backend.clear_session()
-        
-        # Use model.model directly for prediction to avoid device placement issues
-        print("\nStarting GPU-based prediction...")
-        cylinder.predict(use_cpu=False)  # use_cpu parameter is ignored in new implementation
+        # Start prediction
+        print("\nStarting prediction...")
+        # Clean memory before prediction
+        if not use_cpu:
+            tf.keras.backend.clear_session()
+            import gc
+            gc.collect()
+            
+        cylinder.predict()
+        cylinder.animate_flow()
         
     except Exception as e:
         print(f"Error during simulation: {str(e)}")

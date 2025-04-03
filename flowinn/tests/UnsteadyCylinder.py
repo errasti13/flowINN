@@ -6,20 +6,27 @@ from flowinn.models.model import PINN
 from flowinn.training.loss import NavierStokesLoss
 from flowinn.plot.plot import Plot
 from flowinn.physics.boundary_conditions import InletBC, OutletBC, WallBC 
-import matplotlib.pyplot as plt
+from flowinn.nn.architectures import create_mfn_model  # Import network architecture from source code
+from flowinn.training.window_trainer import TimeWindowTrainer  # Import time window trainer from source code
 import os
 
 class UnsteadyCylinder:
-    def __init__(self, caseName: str, xRange: Tuple[float, float], yRange: Tuple[float, float], tRange: Tuple[float, float]):
+    """
+    Test case for unsteady flow around a cylinder using PINN with time window approach.
+    This test demonstrates the Sequential Moving Time Windows approach.
+    """
+    def __init__(self, caseName: str, xRange: Tuple[float, float], yRange: Tuple[float, float], tRange: Tuple[float, float], 
+                activation='gelu', architecture='mfn'):
         """
-        Initialize FlowOverAirfoil simulation.
+        Initialize UnsteadyCylinder simulation.
         
         Args:
             caseName: Name of the simulation case
             xRange: Tuple of (min_x, max_x) domain bounds
             yRange: Tuple of (min_y, max_y) domain bounds
             tRange: Tuple of (min_t, max_t) time bounds
-            Re: Reynolds number
+            activation: Activation function to use ('gelu', 'tanh', 'swish')
+            architecture: Neural network architecture ('mlp', 'mfn', 'fast_mfn')
         """
         if not isinstance(caseName, str):
             raise TypeError("caseName must be a string")
@@ -29,23 +36,47 @@ class UnsteadyCylinder:
         self.logger = logging.getLogger(__name__)
         self.is2D = True
         self.problemTag = caseName
-
-        # Enhanced neural network architecture for unsteady flow
-        # Use alternating layer sizes to better capture multi-scale features
-        layerSizes = []
-        for i in range(6):
-            layerSizes.append(128)
-
+        self.architecture = architecture
+        self.activation = activation
+        
+        # Initialize mesh
         self.mesh = Mesh(self.is2D)
-        # Create model with sine activation for better capturing of periodic phenomena
-        self.model = PINN(
-            input_shape=(3,), 
-            output_shape=3, 
-            eq=self.problemTag, 
-            layers=layerSizes, 
-            activation='swish',  # Swish activation for better gradient flow
-            learning_rate=0.0005  # Lower learning rate for stability
-        )
+        
+        # Initialize model with appropriate architecture from source code module
+        if architecture == 'mfn':
+            # Regular MFN (more accurate but slower)
+            self.model = create_mfn_model(
+                input_shape=(3,),
+                output_shape=3,
+                eq=self.problemTag,
+                activation=activation,
+                fourier_dim=32,
+                layer_sizes=[256] * 6,
+                learning_rate=0.001,
+                trainable_fourier=True,
+                use_adaptive_activation=True
+            )
+        elif architecture == 'fast_mfn':
+            # Fast MFN with reduced parameters for better performance
+            print("Using performance-optimized MFN architecture")
+            self.model = create_mfn_model(
+                input_shape=(3,),
+                output_shape=3,
+                eq=self.problemTag,
+                activation='swish',  # Faster activation function
+                fourier_dim=16,      # Fewer Fourier features
+                layer_sizes=[64] * 4,  # Smaller network
+                learning_rate=0.001
+            )
+        else:
+            self.model = PINN(
+                input_shape=(3,), 
+                output_shape=3, 
+                eq=self.problemTag, 
+                    layers=[128] * 6,
+                    activation=activation,
+                    learning_rate=0.001
+            )
 
         self.loss = None
         self.Plot = None
@@ -54,33 +85,39 @@ class UnsteadyCylinder:
         self.yRange = yRange
         self.tRange = tRange
 
-        self.R   = 1.0  #Cylinder radius
-        self.x0  = 0.0  #Cylinder center x coordinate
-        self.y0  = 0.0  #Cylinder center y coordinate
+        self.R = 1.0  # Cylinder radius
+        self.x0 = 0.0  # Cylinder center x coordinate
+        self.y0 = 0.0  # Cylinder center y coordinate
 
         self.generate_cylinder()
 
-        self.u_inf = 1.0 #Freestream velocity
-        self.P_inf = 101325 #Freestream pressure
-        self.rho = 1.225 #Freestream density
-        self.nu = 0.1 #Kinematic viscosity
-        self.L_ref = xRange[1] - xRange[0] #Length of domain
+        self.u_inf = 1.0  # Freestream velocity
+        self.P_inf = 101325  # Freestream pressure
+        self.rho = 1.225  # Freestream density
+        self.nu = 1.0  # Kinematic viscosity
+        self.L_ref = xRange[1] - xRange[0]  # Length of domain
 
-        self.Re = self.L_ref * self.u_inf / self.nu #Reynolds number
+        self.Re = self.L_ref * self.u_inf / self.nu  # Reynolds number
         print(f"Reynolds number: {self.Re}")
-
-        self.normalize_data()
 
         # Initialize boundary condition objects
         self.inlet_bc = InletBC("inlet")
         self.outlet_bc = OutletBC("outlet")
         self.wall_bc = WallBC("wall")
+        
+        # Initialize time window trainer with parameters from paper
+        self.trainer = TimeWindowTrainer(
+            num_windows=3,
+            initial_lr=0.001,
+            lr_decay_factor=0.999947,
+            max_epochs=100000
+        )
 
         return
     
     def normalize_data(self):
         """
-        Normalize the airfoil coordinates and freestream velocity.
+        Normalize the cylinder coordinates and freestream velocity.
         """
         self.xCylinder = (self.xCylinder) / self.L_ref
         self.yCylinder = (self.yCylinder) / self.L_ref
@@ -117,14 +154,19 @@ class UnsteadyCylinder:
     
     def regenerate_cylinder(self, NBoundary=100):
         self.generate_cylinder(N=NBoundary//2)  # Half points for upper and lower
-        self.normalize_data() #Normalize again for the new set of values.
+        self.normalize_data() # Normalize again for the new set of values.
 
     def generateMesh(self, Nx: int = 100, Ny: int = 100, Nt: int = 100, NBoundary: int = 100, sampling_method: str = 'random'):
+        """Generate mesh for the unsteady cylinder flow problem."""
         try:
             if not all(isinstance(x, int) and x > 0 for x in [Nx, Ny, NBoundary]):
                 raise ValueError("Nx, Ny, and NBoundary must be positive integers")
             if sampling_method not in ['random', 'uniform']:
                 raise ValueError("sampling_method must be 'random' or 'uniform'")
+
+            # Increase points on the cylinder boundary for better resolution
+            self.regenerate_cylinder(NBoundary=NBoundary*2)
+            xCylinder, yCylinder = self.xCylinder, self.yCylinder
                 
             # Initialize boundaries first
             self._initialize_boundaries()
@@ -142,10 +184,6 @@ class UnsteadyCylinder:
             x_outlet = np.full(NBoundary, self.xRange[1])
             y_outlet = np.linspace(self.yRange[0], self.yRange[1], NBoundary)
             
-            # Increase points on the cylinder boundary for better resolution
-            self.regenerate_cylinder(NBoundary=NBoundary*2)
-            xCylinder, yCylinder = self.xCylinder, self.yCylinder
-            
             # Create time points with clustering at the beginning for capturing initial transients
             t_values = np.zeros(NBoundary)
             # Use a nonlinear mapping for better resolution at early times
@@ -156,13 +194,6 @@ class UnsteadyCylinder:
                 t_values[i] = self.tRange[0] + (self.tRange[1] - self.tRange[0]) * (normalized_idx ** beta)
             
             tCylinder = np.repeat(t_values, len(xCylinder) // NBoundary + 1)[:len(xCylinder)].reshape(-1, 1)
-
-            # Validate coordinates
-            all_coords = [x_top, y_top, x_bottom, y_bottom, x_inlet, y_inlet, 
-                         x_outlet, y_outlet, xCylinder, yCylinder]
-            
-            if any(np.any(np.isnan(coord)) for coord in all_coords):
-                raise ValueError("NaN values detected in boundary coordinates")
 
             # Update exterior boundaries
             for name, coords in [
@@ -188,9 +219,6 @@ class UnsteadyCylinder:
                 'y': yCylinder.astype(np.float32),
                 't': tCylinder.astype(np.float32)
             })
-
-            # Validate boundary conditions before mesh generation
-            self._validate_boundary_conditions()
 
             # Generate the mesh
             self.mesh.generateMesh(
@@ -279,7 +307,7 @@ class UnsteadyCylinder:
             }
         }
         
-        # Initialize interior boundary (airfoil) separately
+        # Initialize interior boundary (cylinder) separately
         self.mesh.interiorBoundaries = {
             'Cylinder': {
                 'x': None,
@@ -295,344 +323,164 @@ class UnsteadyCylinder:
             }
         }
 
-    def _validate_boundary_conditions(self):
-        """Validate boundary conditions before mesh generation."""
-        # Check exterior boundaries
-        for name, boundary in self.mesh.boundaries.items():
-            if any(key not in boundary for key in ['x', 'y', 't', 'conditions', 'bc_type']):
-                raise ValueError(f"Missing required fields in boundary {name}")
-            if boundary['x'] is None or boundary['y'] is None or boundary['t'] is None:
-                raise ValueError(f"Coordinates not set for boundary {name}")
-
-        # Check interior boundaries
-        for name, boundary in self.mesh.interiorBoundaries.items():
-            if any(key not in boundary for key in ['x', 'y', 't', 'conditions', 'bc_type']):
-                raise ValueError(f"Missing required fields in interior boundary {name}")
-            if boundary['x'] is None or boundary['y'] is None or boundary['t'] is None:
-                raise ValueError(f"Coordinates not set for interior boundary {name}")
-
     def getLossFunction(self):
+        """
+        Configure the Navier-Stokes loss function for unsteady flow.
+        
+        Returns:
+            A callable loss function
+        """
         # Use specific weights for unsteady flow - emphasize physics more
         self.loss = NavierStokesLoss('unsteady', self.mesh, self.model, Re=self.Re, weights=[0.9, 0.1])
         
-        # Access the underlying unsteady loss object to customize it
-        unsteady_loss = self.loss
+        # Set ReLoBraLo parameters for better balance during training if available
+        if hasattr(self.loss, 'lookback_window'):
+            self.loss.lookback_window = 100  # More history for stability
+        if hasattr(self.loss, 'alpha'):
+            self.loss.alpha = 0.05         # Smaller alpha for smoother adjustments
+        if hasattr(self.loss, 'min_weight'):
+            self.loss.min_weight = 0.2     # Higher minimum physics weight
+        if hasattr(self.loss, 'max_weight'):
+            self.loss.max_weight = 0.95    # Higher maximum physics weight
         
-        # Set ReLoBraLo parameters for better balance during training
-        unsteady_loss.lookback_window = 100  # More history for stability
-        unsteady_loss.alpha = 0.05          # Smaller alpha for smoother adjustments
-        unsteady_loss.min_weight = 0.2      # Higher minimum physics weight
-        unsteady_loss.max_weight = 0.95     # Higher maximum physics weight
-        
-        return unsteady_loss
+        # Make sure we're returning a callable function
+        if hasattr(self.loss, 'loss_function') and callable(self.loss.loss_function):
+            return self.loss.loss_function  # Return the method
+        else:
+            # Fallback: create a wrapper function if loss_obj is callable
+            if callable(self.loss):
+                return self.loss  # Return the object if it's callable
+            else:
+                # Last resort: create a wrapper around the loss object
+                def loss_wrapper(batch_data=None):
+                    return self.loss(batch_data)
+                return loss_wrapper
     
-    def train(self, epochs=10000, print_interval=100, autosaveInterval=10000, num_batches=10, use_cpu=False):
-        self.getLossFunction()
-        
-        # Calculate time window size based on expected flow oscillation period
-        # For vortex shedding, we want to capture at least one shedding cycle in a window
-        # Strouhal number for cylinder is ~0.2, so period T ≈ 5D/U for D=1 and U=1
-        expected_period = 5.0  # Non-dimensional time units
-        
-        # Time window should be at least 1/4 of the period to capture temporal correlations
-        target_window_fraction = 0.25
-        
-        # Calculate number of time steps corresponding to our target window
-        dt = (self.tRange[1] - self.tRange[0]) / len(self.mesh.t)  # Approximate time step size
-        time_window_size = max(3, int(target_window_fraction * expected_period / dt))
-        
-        # Make sure window size is reasonable
-        time_window_size = min(time_window_size, 50)  # Cap window size to avoid CUDA memory issues
-        
-        # First stage: Focus on initial condition and early time steps with higher noise
-        print(f"\n=== Stage 1: Training initial condition and early dynamics ===")
-        print(f"Using time window size: {time_window_size} steps")
-        
-        # Save original time range
-        original_tRange = self.mesh.t.copy()
-        
-        # Create a reduced time range for first training stage (first 30% of time)
-        early_time_idx = int(len(self.mesh.t) * 0.3)
-        self.mesh.t = self.mesh.t[:early_time_idx]
-        
-        # Initial stage with smaller window size for early dynamics
-        early_window_size = min(time_window_size, len(self.mesh.t) // 3)
-        early_window_size = max(3, early_window_size)  # Ensure at least 3 time steps
-        
-        # Start with higher noise level to encourage exploration
-        initial_noise_level = 0.02
-        
-        # Train with focus on early time and higher noise
-        self.model.train(
-            self.loss.loss_function,
-            self.mesh,
-            epochs=int(epochs * 0.3),  # 30% of epochs for initial stage
-            print_interval=print_interval,
-            autosave_interval=autosaveInterval,
-            num_batches=num_batches,
-            plot_loss=False,  # Never plot loss
-            patience=2000,
-            min_delta=1e-6,
-            time_window_size=early_window_size,
-            add_noise=False,
-            noise_level=initial_noise_level,
-            use_cpu=use_cpu  # Pass CPU flag to handle CUDA errors
-        )
-        
-        # Second stage: Train on full time range with medium noise
-        print(f"\n=== Stage 2: Training on full time range with medium noise ===")
-        print(f"Using time window size: {time_window_size} steps")
-        
-        # Restore original time range
-        self.mesh.t = original_tRange
-        
-        # Medium noise level for main training phase
-        medium_noise_level = 0.01
-        
-        # Continue training with full time range, full window size, and medium noise
-        self.model.train(
-            self.loss.loss_function,
-            self.mesh,
-            epochs=int(epochs * 0.5),  # 50% of epochs for main training
-            print_interval=print_interval,
-            autosave_interval=autosaveInterval,
-            num_batches=num_batches,
-            plot_loss=False,  # Never plot loss
-            patience=2000,
-            min_delta=1e-7,
-            time_window_size=time_window_size,
-            add_noise=True,
-            noise_level=medium_noise_level,
-            use_cpu=use_cpu  # Pass CPU flag to handle CUDA errors
-        )
-        
-        # Third stage: Fine-tuning with minimal noise
-        print(f"\n=== Stage 3: Fine-tuning with minimal noise ===")
-        
-        # Low noise level for fine-tuning
-        final_noise_level = 0.001
-        
-        # Final fine-tuning with minimal noise
-        self.model.train(
-            self.loss.loss_function,
-            self.mesh,
-            epochs=int(epochs * 0.2),  # 20% of epochs for fine-tuning
-            print_interval=print_interval,
-            autosave_interval=autosaveInterval,
-            num_batches=num_batches,
-            plot_loss=False,  # Never plot loss
-            patience=1000,
-            min_delta=1e-8,
-            time_window_size=time_window_size,
-            add_noise=True,
-            noise_level=final_noise_level,
-            use_cpu=use_cpu  # Pass CPU flag to handle CUDA errors
-        )
-
-    def predict(self, use_cpu=False) -> None:
+    def train(self, epochs=None, print_interval=100, autosaveInterval=10000, num_batches=10, 
+            use_cpu=False, num_spatial_batches=4, num_temporal_batches=3):
         """
-        Predict flow solution and create animation frames using GPU.
+        Train the model using moving time window approach from the paper.
+        
+        Args:
+            epochs: Maximum epochs per window (default uses value from paper: 100000)
+            print_interval: Interval for printing loss information
+            autosaveInterval: Interval for autosaving the model
+            num_batches: Number of batches for mini-batch training
+            use_cpu: Whether to use CPU instead of GPU
+            memory_limit: GPU memory limit in MB (2000MB = ~2GB, default)
+            num_spatial_batches: Number of batches to divide spatial domain into
+            num_temporal_batches: Number of batches to divide temporal domain into
         """
         try:
-            # Force GPU usage - ignore use_cpu parameter
-            os.environ.pop('CUDA_VISIBLE_DEVICES', None)  # Remove any restrictions
+            # Get loss function
+            loss_function = self.getLossFunction()
             
-            import tensorflow as tf
-            # Clear any existing session/graph
-            tf.keras.backend.clear_session()
+            print("\nStarting training with moving time window approach...")
+            print(f"Using architecture: {self.architecture}, activation: {self.activation}")
+            print(f"Max epochs per window: {epochs if epochs else 'default'}")
+            print(f"Memory-efficient batching: {num_spatial_batches} spatial x {num_temporal_batches} temporal batches")
             
-            # Set memory growth to avoid OOM errors
-            gpus = tf.config.experimental.list_physical_devices('GPU')
-            if gpus:
-                try:
-                    for gpu in gpus:
-                        tf.config.experimental.set_memory_growth(gpu, True)
-                    print(f"Using GPU: {gpus[0].name}")
-                except RuntimeError as e:
-                    print(f"GPU memory config error: {e}")
-            
-            nt = 100  # Number of time steps for visualization
-            tPred = np.linspace(self.tRange[0], self.tRange[1], nt)
-
-            print("Predicting flow field from ", tPred[0], " to ", tPred[-1])
-            print("Using GPU for prediction - no fallbacks to CPU")
-
-            # Prepare mesh points
-            x_min, x_max = self.xRange
-            y_min, y_max = self.yRange
-            
-            # Create a denser uniform grid for visualization
-            nx, ny = 150, 150  # Increased resolution for visualization
-            x = np.linspace(x_min, x_max, nx)
-            y = np.linspace(y_min, y_max, ny)
-            
-            # Create mesh grid
-            X_mesh, Y_mesh = np.meshgrid(x, y)
-            
-            # Flatten for prediction
-            X_flat = X_mesh.flatten()
-            Y_flat = Y_mesh.flatten()
-            
-            # Create directory for animation frames
-            os.makedirs('animation_frames', exist_ok=True)
-            
-            # Initialize plotting
-            self.generate_plots()
-
-            print("Generating animation frames...")
-            
-            # Create mask for cylinder
-            cylinder_mask = np.zeros_like(X_flat, dtype=bool)
-            for i in range(len(X_flat)):
-                dist = np.sqrt((X_flat[i] - self.x0)**2 + (Y_flat[i] - self.y0)**2)
-                cylinder_mask[i] = dist <= self.R
-            
-            # For GPU stability, process time steps in smaller chunks
-            # to avoid memory issues while staying on GPU
-            chunk_size = 10  # Process this many time steps at once
-            
-            for chunk_start in range(0, len(tPred), chunk_size):
-                chunk_end = min(chunk_start + chunk_size, len(tPred))
-                chunk_tPred = tPred[chunk_start:chunk_end]
                 
-                print(f"\nProcessing time chunk {chunk_start//chunk_size + 1}/{(len(tPred)+chunk_size-1)//chunk_size}")
+            # Use the TimeWindowTrainer to train the model with moving time windows
+            # This uses the implementation from the paper with:
+            # - 3 time windows
+            # - Learning rate decay with gamma = 0.999947
+            # - Initial conditions transferred between windows
+            history = self.trainer.train(
+                model=self.model,
+                loss_function=loss_function,
+                mesh=self.mesh,
+                tRange=self.tRange,
+                epochs=epochs,
+                print_interval=print_interval,
+                autosave_interval=autosaveInterval,
+                num_batches=num_batches,
+                save_name=self.problemTag,
+                num_spatial_batches=num_spatial_batches,
+                num_temporal_batches=num_temporal_batches,
+                patience=100
+            )
+            
+            print(f"Training completed.")
+            
+            # Create plots directory if it doesn't exist
+            os.makedirs('plots', exist_ok=True)
+            
+            # Plot training history
+            if hasattr(self.trainer, 'plot_loss_history'):
+                self.trainer.plot_loss_history(save_path=f'plots/{self.problemTag}_loss_history.png')
                 
-                # Process each time step in this chunk
-                for i, t in enumerate(chunk_tPred):
-                    global_i = chunk_start + i
-                    print(f"  Time step {global_i+1}/{len(tPred)}: t = {t:.4f}")
-                    
-                    # Create input tensor for current time
-                    time_values = np.full_like(X_flat, t)
-                    X_input = np.column_stack([X_flat, Y_flat, time_values])
-                    
-                    # Convert to TensorFlow tensor
-                    X_input_tf = tf.convert_to_tensor(X_input, dtype=tf.float32)
-                    
-                    # Force prediction on GPU - direct model call to avoid any device switching
-                    with tf.device('/device:GPU:0'):
-                        predictions = self.model.model(X_input_tf, training=False).numpy()
-                    
-                    # Extract velocity components and pressure
-                    u = predictions[:, 0].reshape(ny, nx)
-                    v = predictions[:, 1].reshape(ny, nx)
-                    p = predictions[:, 2].reshape(ny, nx)
-                    
-                    # Calculate velocity magnitude for this time step
-                    vel_mag = np.sqrt(u**2 + v**2)
-                    
-                    # Calculate vorticity (curl of velocity field) for this time step
-                    vorticity = self.calculate_vorticity(u, v, x, y)
-                    
-                    # Create mask for cylinder in 2D arrays
-                    mask_2d = cylinder_mask.reshape(ny, nx)
-                    
-                    # Apply mask to fields (set values inside cylinder to NaN for visualization)
-                    u = np.where(mask_2d, np.nan, u)
-                    v = np.where(mask_2d, np.nan, v)
-                    p = np.where(mask_2d, np.nan, p)
-                    vel_mag = np.where(mask_2d, np.nan, vel_mag)
-                    vorticity = np.where(mask_2d, np.nan, vorticity)
-                    
-                    # Plot and save velocity field
-                    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 8))
-                    
-                    # Velocity magnitude plot
-                    cm1 = ax1.pcolormesh(X_mesh, Y_mesh, vel_mag, cmap='viridis', shading='auto')
-                    plt.colorbar(cm1, ax=ax1, label='Velocity Magnitude')
-                    
-                    # Add velocity vectors (subsample for clarity)
-                    skip = 8
-                    ax1.quiver(X_mesh[::skip, ::skip], Y_mesh[::skip, ::skip], 
-                              u[::skip, ::skip], v[::skip, ::skip], 
-                              scale=25, alpha=0.7)
-                    
-                    # Draw cylinder
-                    circle = plt.Circle((self.x0, self.y0), self.R, color='white', fill=True)
-                    ax1.add_patch(circle)
-                    ax1.set_aspect('equal')
-                    ax1.set_title(f'Velocity Field at t = {t:.4f}')
-                    ax1.set_xlabel('x')
-                    ax1.set_ylabel('y')
-                    
-                    # Vorticity plot
-                    cm2 = ax2.pcolormesh(X_mesh, Y_mesh, vorticity, cmap='RdBu_r', 
-                                        shading='auto', vmin=-5, vmax=5)
-                    plt.colorbar(cm2, ax=ax2, label='Vorticity')
-                    
-                    # Draw cylinder on vorticity plot
-                    circle2 = plt.Circle((self.x0, self.y0), self.R, color='black', fill=True)
-                    ax2.add_patch(circle2)
-                    ax2.set_aspect('equal')
-                    ax2.set_title(f'Vorticity at t = {t:.4f}')
-                    ax2.set_xlabel('x')
-                    ax2.set_ylabel('y')
-                    
-                    plt.tight_layout()
-                    
-                    # Save frame
-                    plt.savefig(f'animation_frames/flow_t{global_i:04d}.png', dpi=150)
-                    plt.close()
-                
-                # Free memory between chunks
-                tf.keras.backend.clear_session()
-                
-                # Re-initialize model on GPU
-                with tf.device('/device:GPU:0'):
-                    tf.keras.backend.clear_session()
-                
-            # Create a simple animation command suggestion
-            print("\nTo create an animation from the saved frames, you can use:")
-            print("ffmpeg -framerate 10 -i animation_frames/flow_t%04d.png -c:v libx264 -pix_fmt yuv420p cylinder_flow.mp4")
-                
+            return history
+            
         except Exception as e:
-            print(f"Error in prediction: {str(e)}")
+            print(f"Error during training: {str(e)}")
             import traceback
             traceback.print_exc()
             raise
 
-    def calculate_vorticity(self, u, v, x_grid, y_grid):
-        """Calculate vorticity (curl of velocity field) using finite differences."""
-        dx = x_grid[1] - x_grid[0]
-        dy = y_grid[1] - y_grid[0]
-        
-        # Calculate partial derivatives
-        # Use central differences for interior points
-        du_dy = np.zeros_like(u)
-        dv_dx = np.zeros_like(v)
-        
-        # Interior points using central difference
-        du_dy[1:-1, :] = (u[2:, :] - u[:-2, :]) / (2 * dy)
-        dv_dx[:, 1:-1] = (v[:, 2:] - v[:, :-2]) / (2 * dx)
-        
-        # Edge points using forward/backward differences
-        du_dy[0, :] = (u[1, :] - u[0, :]) / dy
-        du_dy[-1, :] = (u[-1, :] - u[-2, :]) / dy
-        dv_dx[:, 0] = (v[:, 1] - v[:, 0]) / dx
-        dv_dx[:, -1] = (v[:, -1] - v[:, -2]) / dx
-        
-        # Vorticity (ω = dv/dx - du/dy)
-        vorticity = dv_dx - du_dy
-        
-        return vorticity
-
-    def write_solution(self, filename=None):
-        """Write the solution to a CSV format file."""
-        if filename is None:
-            filename = f"{self.problemTag}_solution.csv"
-        elif not filename.endswith('.csv'):
-            filename += '.csv'
-        
+    def predict(self):
+        """Predict flow solution over the entire time domain."""
         try:
-            # Ensure solutions are properly shaped before writing
-            if any(key not in self.mesh.solutions for key in ['u', 'v', 'p']):
-                raise ValueError("Missing required solution components (u, v, p)")
+            # Initialize plotting object
+            self.generate_plots()
+
+            nt = 100
+            t = np.linspace(self.tRange[0], self.tRange[1], nt)
+
+            X_pred = self.mesh.x.flatten()[:, None]
+            Y_pred = self.mesh.y.flatten()[:, None]
+
+            nx, ny = int(np.sqrt(len(X_pred))), int(np.sqrt(len(X_pred)))
             
-            self.mesh.write_tecplot(filename)
+            # Initialize storage for all solutions
+            self.all_solutions = {
+                'u': np.zeros((nx, ny, nt)),
+                'v': np.zeros((nx, ny, nt)),
+                'p': np.zeros((nx, ny, nt)),
+                'vMag': np.zeros((nx, ny, nt)),
+                'vorticity': np.zeros((nx, ny, nt))
+            }
+            
+            # Store prediction coordinates for later use
+            self.pred_X_mesh = X_pred
+            self.pred_Y_mesh = Y_pred
+            self.pred_t = t
+            
+            # For each time step
+            for i, current_t in enumerate(t):
+                print(f"  Time step {i+1}/{nt}: t = {current_t:.4f}")
+                
+                # Create input tensor with current time value
+                T_pred = np.full_like(X_pred, current_t)
+                X = np.hstack((X_pred, Y_pred, T_pred))
+                
+                # Get solution from model
+                sol = self.model.predict(X)
+
+                # Store primary solution components for current timestep
+                self.mesh.solutions['u'] = sol[:, 0]
+                self.mesh.solutions['v'] = sol[:, 1]
+                self.mesh.solutions['p'] = sol[:, 2]
+
+                # Calculate and store velocity magnitude
+                self.mesh.solutions['vMag'] = np.sqrt(
+                    self.mesh.solutions['u']**2 + 
+                    self.mesh.solutions['v']**2
+                )
+            
+                # Reshape and store the solutions for this timestep
+                self.all_solutions['u'][:, :, i] = sol[:, 0].reshape(nx, ny)
+                self.all_solutions['v'][:, :, i] = sol[:, 1].reshape(nx, ny)
+                self.all_solutions['p'][:, :, i] = sol[:, 2].reshape(nx, ny)
+                self.all_solutions['vMag'][:, :, i] = self.mesh.solutions['vMag'].reshape(nx, ny)
+            
+            print("Prediction completed successfully!")
             
         except Exception as e:
-            print(f"Error writing solution: {str(e)}")
-            raise
+            self.logger.error(f"Prediction failed: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            raise Exception(f"Prediction failed: {str(e)}") from e
     
     def generate_plots(self):
         """Initialize plotting object with custom styling."""
@@ -648,67 +496,199 @@ class UnsteadyCylinder:
             axis_label_size=11
         )
 
-    def plot(self, solkey='u', plot_type='default', **kwargs):
+    def plot(self, solkey='vMag', title='', savePath=None, show=False):
         """
-        Create various types of plots for the solution fields.
-        
-        Args:
-            solkey (str): Solution field to plot ('u', 'v', 'p', 'vMag')
-            plot_type (str): Type of plot to create:
-                - 'default': Scatter plot with boundaries
-                - 'quiver': Vector field plot showing flow direction
-                - 'slices': Multiple y-plane slices (3D only)
-            **kwargs: Additional plotting parameters
+        Plot the solution field at a specific time index.
         """
-        if not hasattr(self, 'Plot'):
-            self.generate_plots()
+        self.Plot.scatterPlot(solkey, title=title, savePath=savePath, show=show)
 
-        if plot_type == 'quiver':
-            self.Plot.vectorField(xRange=self.xRange, yRange=self.yRange, **kwargs)
-        elif plot_type == 'default':
-            self.Plot.scatterPlot(solkey)
-        elif plot_type == 'slices':
-            if self.mesh.is2D:
-                raise ValueError("Slice plotting is only available for 3D meshes")
-            self.Plot.plotSlices(solkey, **kwargs)
+    def animate_flow(self, solkey='vMag', start_idx=0, end_idx=None, skip=1, 
+                   output_file='cylinder_flow.mp4', **kwargs):
+        """
+        Create an animation of the flow field.
+        """
+        # Check if prediction data exists in memory
+        if not hasattr(self, 'all_solutions') or not self.all_solutions:
+            print("Prediction data not found in memory. Run predict() first.")
+            return
+            
+        # Extract time steps from stored prediction data
+        t = self.pred_t
+        num_time_steps = len(t)
+        
+        if end_idx is None:
+            end_idx = num_time_steps
         else:
-            raise ValueError(f"Invalid plot type: {plot_type}")
-
-    def export_plots(self, directory="results", format=".png"):
-        """
-        Export all solution field plots to files.
+            end_idx = min(end_idx, num_time_steps)
+            
+        # Validate indices
+        if not (0 <= start_idx < num_time_steps):
+            print(f"Invalid start_idx {start_idx}. Must be between 0 and {num_time_steps-1}")
+            return
+            
+        if end_idx <= start_idx:
+            print(f"Invalid end_idx {end_idx}. Must be greater than start_idx ({start_idx})")
+            return
         
-        Args:
-            directory (str): Directory to save plots
-            format (str): File format ('.png', '.pdf', '.svg', etc.)
-        """
-        os.makedirs(directory, exist_ok=True)
+        # Create animation_frames directory
+        frames_dir = 'animation_frames'
+        os.makedirs(frames_dir, exist_ok=True)
         
-        # Ensure all fields are available
-        if not all(key in self.mesh.solutions for key in ['u', 'v', 'p', 'vMag']):
-            raise ValueError(
-                "Missing required solution components. "
-                "Make sure to run predict() before exporting plots."
-            )
-        
-        # Ensure Plot object exists
-        if not hasattr(self, 'Plot'):
-            self.generate_plots()
-        
-        # Export standard field plots
-        for solkey in ['u', 'v', 'p', 'vMag']:
-            plt.figure()
-            self.Plot.scatterPlot(solkey)
-            filename = os.path.join(directory, f"{self.problemTag}_AoA{self.AoA}_{solkey}{format}")
-            plt.savefig(filename, bbox_inches='tight', dpi=self.Plot.style['dpi'])
-            plt.close()
-        
-        # Export vector field plot
-        plt.figure(figsize=self.Plot.style['figsize'])
-        self.plot(plot_type='quiver')
-        filename = os.path.join(directory, f"{self.problemTag}_AoA{self.AoA}_quiver{format}")
-        plt.savefig(filename, bbox_inches='tight', dpi=self.Plot.style['dpi'])
-        plt.close()
+        # Generate frames
+        frame_count = 0
+        total_frames = (end_idx - start_idx + skip - 1) // skip
+        for i in range(start_idx, end_idx, skip):
+            frame_count += 1
+            print(f"Generating frame {frame_count}/{total_frames}: time step {i}")
+            
+            # Get the solution data for this time step
+            solution_at_time = self.all_solutions[solkey][:, :, i]
+            current_time = self.pred_t[i]
+            
+            self.mesh.solutions = {solkey: solution_at_time.flatten()}
+            
+            # Set frame filename
+            frame_filename = f'frame_{i:04d}.png'
+            frame_path = os.path.join(frames_dir, frame_filename)
+            
+            # Create and save the frame using plot function
+            title = f"{solkey} at t = {current_time:.4f}"
+            self.plot(solkey=solkey, title=title, savePath=frame_path, show=False)
+            
+        # Clean up temporary data in mesh to avoid confusion
+        self.mesh.solutions = {}
+            
+        # Display ffmpeg command if frames were generated
+        if frame_count > 0:
+            print(f"\nGenerated {frame_count} frames in '{frames_dir}/'")
+            print("To create an animation (requires ffmpeg), run a command like this in your terminal:")
+            ffmpeg_input_path = os.path.join(frames_dir, 'frame_%04d.png') 
+            print(f"ffmpeg -framerate 10 -i {ffmpeg_input_path} -c:v libx264 -pix_fmt yuv420p {output_file}")
 
     def load_model(self):
-        self.model.load(self.problemTag)
+        """
+        Load a trained model with architecture-specific handling.
+        """
+        try:
+            # Try to load model metadata to determine architecture
+            import os
+            import json
+            
+            metadata_path = f'trainedModels/{self.problemTag}_metadata.json'
+            if os.path.exists(metadata_path):
+                try:
+                    with open(metadata_path, 'r') as f:
+                        metadata = json.load(f)
+                    
+                    # Check if architecture info is stored in metadata
+                    stored_architecture = metadata.get('architecture_type', None)
+                    if stored_architecture:
+                        print(f"Loading model with architecture: {stored_architecture}")
+                        self.architecture = stored_architecture
+                except Exception as e:
+                    print(f"Warning: Could not load architecture from metadata: {e}")
+            
+            # Load model based on the architecture
+            if self.architecture in ('mfn', 'fast_mfn'):
+                # For MFN architectures, we need to recreate the proper structure first
+                # then load weights into it
+                from flowinn.nn.architectures import create_mfn_model
+                
+                print(f"Re-creating {self.architecture} structure before loading...")
+                
+                # Create structure with appropriate parameters
+                if self.architecture == 'fast_mfn':
+                    self.model = create_mfn_model(
+                        input_shape=(3,),
+                        output_shape=3,
+                        eq=self.problemTag,
+                        activation='swish',
+                        fourier_dim=16,
+                        layer_sizes=[64] * 4,
+                        learning_rate=0.001
+                    )
+                else:
+                    self.model = create_mfn_model(
+                        input_shape=(3,),
+                        output_shape=3,
+                        eq=self.problemTag,
+                        activation=self.activation,
+                        fourier_dim=32,
+                        layer_sizes=[128] * 6,
+                        learning_rate=0.001,
+                        trainable_fourier=False,
+                        use_adaptive_activation=True
+                    )
+                
+                # Now load the trained weights into this structure
+                model_path = f'trainedModels/{self.problemTag}.keras'
+                if os.path.exists(model_path):
+                    self.model.model.load_weights(model_path)
+                    print(f"Successfully loaded weights into {self.architecture} model")
+                else:
+                    raise FileNotFoundError(f"Model file not found: {model_path}")
+            else:
+                # For standard PINN models, use the regular load method
+                self.model.load(self.problemTag)
+                
+            print(f"Model loaded successfully")
+        except Exception as e:
+            print(f"Error loading model: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+    
+    def save_model(self, custom_name=None):
+        """
+        Save the model with architecture metadata.
+        
+        Args:
+            custom_name: Optional custom name for the saved model
+        """
+        try:
+            model_name = custom_name or self.problemTag
+            
+            # Create trainedModels directory if it doesn't exist
+            os.makedirs('trainedModels', exist_ok=True)
+            
+            # For MFN architectures, we need special handling
+            if self.architecture in ('mfn', 'fast_mfn'):
+                # Save the underlying Keras model
+                model_path = f'trainedModels/{model_name}.keras'
+                self.model.model.save(model_path)
+                
+                # Save additional metadata with architecture information
+                metadata = {
+                    'activation': self.activation,
+                    'learning_rate': 0.001,  # Default learning rate
+                    'input_dim': 3,          # 3D input for unsteady problems (x, y, t)
+                    'eq': self.problemTag,
+                    'architecture_type': self.architecture,
+                    'model_version': '1.0',
+                    'reynolds_number': self.Re,
+                    'domain': {
+                        'x_range': self.xRange,
+                        'y_range': self.yRange,
+                        't_range': self.tRange
+                    }
+                }
+                
+                # Save metadata to a JSON file
+                metadata_path = f'trainedModels/{model_name}_metadata.json'
+                with open(metadata_path, 'w') as f:
+                    import json
+                    json.dump(metadata, f, indent=2)
+                    
+                print(f"Model successfully saved to {model_path}")
+                print(f"Model metadata saved to {metadata_path}")
+            else:
+                # For standard PINN models, use the regular save method
+                # Always save to trainedModels directory
+                self.model.save(f'trainedModels/{model_name}')
+            
+            return True
+        except Exception as e:
+            print(f"Error saving model: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
