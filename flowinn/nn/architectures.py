@@ -22,7 +22,7 @@ class FourierFeatureLayer(layers.Layer):
         - Tancik et al. (2020) - "Fourier Features Let Networks Learn High Frequency Functions in Low Dimensional Domains"
         - NVIDIA Modulus library
     """
-    def __init__(self, fourier_dim=32, scale=10.0, temporal_scale=None, trainable=False, **kwargs):
+    def __init__(self, fourier_dim=32, scale=10.0, temporal_scale=None, trainable=True, **kwargs):
         """
         Args:
             fourier_dim (int): The number of random Fourier features.
@@ -102,7 +102,7 @@ class AdaptiveActivation(layers.Layer):
     def build(self, input_shape):
         # Trainable parameter that controls activation shape
         self.a = self.add_weight(
-            'activation_param',
+            name='activation_param',
             shape=(),
             initializer=tf.keras.initializers.Constant(self.initial_param),
             trainable=True
@@ -132,7 +132,8 @@ class AdaptiveActivation(layers.Layer):
 
 
 def create_mfn_model(input_shape, output_shape, eq, activation='gelu', fourier_dim=32, 
-                    layer_sizes=None, learning_rate=0.001, use_adaptive_activation=False):
+                    layer_sizes=None, learning_rate=0.001, use_adaptive_activation=False, 
+                    trainable_fourier=False):
     """
     Create a Modified Fourier Network (MFN) model.
     
@@ -176,7 +177,7 @@ def create_mfn_model(input_shape, output_shape, eq, activation='gelu', fourier_d
     input_layer = layers.Input(shape=input_shape)
     
     # Direct Fourier feature mapping (more efficient)
-    x = FourierFeatureLayer(fourier_dim)(input_layer)
+    x = FourierFeatureLayer(fourier_dim, trainable=trainable_fourier)(input_layer)
     
     # Skip the additional dense layers after Fourier mapping
     # This significantly reduces computational cost
