@@ -13,6 +13,7 @@ References:
 import os
 import time
 import numpy as np
+import cupy as cp
 import tensorflow as tf
 import inspect
 from datetime import datetime
@@ -62,48 +63,53 @@ class TimeWindowTrainer:
         
     def set_learning_rate(self, model, learning_rate):
         """
-        Set the learning rate for the model optimizer.
+        Set the learning rate for the model optimizer robustly.
         
         Args:
             model: The PINN model
-            learning_rate: New learning rate
+            learning_rate: New learning rate value (float)
         """
         try:
-            # Get the current optimizer
             optimizer = model.optimizer
             
-            # Set the learning rate
-            if isinstance(optimizer, tf.keras.optimizers.Optimizer):
-                # For TF2 optimizers
-                if hasattr(optimizer.learning_rate, 'assign'):
-                    # Use assign if available
-                    optimizer.learning_rate.assign(learning_rate)
+            if hasattr(optimizer, 'learning_rate'):
+                lr_object = optimizer.learning_rate
+                if hasattr(lr_object, 'assign'):
+                    # Best case: Assign directly if it's assignable (like a tf.Variable or some schedules)
+                    lr_object.assign(learning_rate)
+                    print(f"Learning rate assigned to {learning_rate:.8f}")
                 else:
-                    # For EagerTensor learning rates, create a new optimizer
-                    # with the same parameters but a different learning rate
-                    config = optimizer.get_config()
-                    config['learning_rate'] = learning_rate
-                    optimizer_class = type(optimizer)
-                    new_optimizer = optimizer_class.from_config(config)
-                    model.optimizer = new_optimizer
-            elif hasattr(optimizer, 'lr'):
-                # For legacy optimizers
-                if hasattr(optimizer.lr, 'assign'):
-                    optimizer.lr.assign(learning_rate)
-                else:
-                    # Try direct setting if assign not available
-                    tf.keras.backend.set_value(optimizer.lr, learning_rate)
+                    # Fallback: Try setting value using backend if direct assign fails
+                    # This might work for simple tensors or some schedule objects
+                    try:
+                        tf.keras.backend.set_value(lr_object, learning_rate)
+                        print(f"Learning rate set via backend to {learning_rate:.8f}")
+                    except Exception as e_setval:
+                        print(f"Warning: Could not assign or set_value learning rate ({e_setval}). Optimizer replacement may occur (risk of tf.function errors).")
+                        # Last Resort (Risky): Recreate optimizer - try to avoid this
+                        # config = optimizer.get_config()
+                        # config['learning_rate'] = learning_rate
+                        # model.optimizer = type(optimizer).from_config(config)
+                        # print(f"Optimizer recreated with learning rate {learning_rate:.8f}")
+                        # Force build the new optimizer IF it was replaced, outside tf.function
+                        # if not optimizer.built:
+                        #    optimizer.build(model.model.trainable_variables)
             else:
-                # Fall back to creating a new optimizer
-                model.optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
-            
-            print(f"Learning rate set to {learning_rate:.8f}")
+                 print(f"Warning: Optimizer {type(optimizer)} has no 'learning_rate' attribute.")
+                 # Fallback: Create a new optimizer if LR can't be accessed/set
+                 model.optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+                 print(f"Created new Adam optimizer with learning rate {learning_rate:.8f}")
+                 # Force build the new optimizer
+                 # model.optimizer.build(model.model.trainable_variables)
+
         except Exception as e:
-            print(f"Warning: Could not set learning rate - {str(e)}")
-            print(f"Creating new optimizer with learning rate {learning_rate:.8f}")
-            # Last resort - create a new Adam optimizer
+            print(f"Error setting learning rate: {str(e)}")
+            print(f"Attempting to create new Adam optimizer with learning rate {learning_rate:.8f}")
+            # Ensure recreation on any error
             model.optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
-        
+            # Force build the new optimizer
+            # model.optimizer.build(model.model.trainable_variables) # Build needs variables
+
     def _get_supported_train_params(self, model, all_params):
         """
         Determine which parameters are supported by the model's train method.
