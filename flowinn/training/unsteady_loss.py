@@ -1,6 +1,7 @@
 from flowinn.physics.unsteady_2D import UnsteadyNavierStokes2D
 from flowinn.training.base_loss import NavierStokesBaseLoss
 import tensorflow as tf
+import numpy as np
 
 class UnsteadyNavierStokesLoss(NavierStokesBaseLoss):
     def __init__(self, mesh, model, Re: float = 1000.0, physics_model='NS2D', weights=[0.7, 0.3]) -> None:
@@ -159,49 +160,139 @@ class UnsteadyNavierStokesLoss(NavierStokesBaseLoss):
 
         return interior_loss
     
+    @tf.autograph.experimental.do_not_convert
     def compute_initial_loss(self):
         """Compute loss for initial conditions."""
         initial_loss = 0.0
 
-        for var_name, initial_data in self.mesh.initialConditions.items():
+        # Ensure initialConditions attribute exists
+        if not hasattr(self.mesh, 'initialConditions') or not self.mesh.initialConditions:
+            return 0.0 # Return zero loss if no initial conditions defined
+
+        for ic_name, initial_data in self.mesh.initialConditions.items():
             try:
-                # Get coordinates for initial condition
-                coords = []
+                # Check if all required coordinates exist
+                has_all_coords = True
                 for coord in ['x', 'y', 't']:
-                    if coord in initial_data:
-                        # Check if the value is a single float
-                        if isinstance(initial_data[coord], float) or isinstance(initial_data[coord], int):
-                            # Create a tensor with the same shape as other coordinates
-                            num_points = len(initial_data['x']) if 'x' in initial_data else len(initial_data['y'])
-                            coord_tensor = tf.fill([num_points, 1], initial_data[coord])
-                        else:
-                            # Original behavior for array-like values
-                            coord_tensor = tf.reshape(tf.convert_to_tensor(initial_data[coord], dtype=tf.float32), [-1, 1])
-                        coords.append(coord_tensor)
+                    if coord not in initial_data:
+                        print(f"Warning: Missing '{coord}' coordinate for initial condition '{ic_name}'. Skipping.")
+                        has_all_coords = False
+                        break
                 
-                # Get predictions for initial condition
-                input_tensor = tf.concat(coords, axis=1)
-                predictions = self.model.model(input_tensor)
+                if not has_all_coords:
+                    continue
                 
-                # Split predictions into velocities and pressure
-                velocities = predictions[:, :-1]  # All velocity components
-                pressure = predictions[:, -1]     # Pressure component
+                # Handle mesh points with appropriate flattening
+                x_data = initial_data['x']
+                y_data = initial_data['y']
+                t_data = initial_data['t']
                 
-                # Apply initial condition and compute loss
-                if 'u' in initial_data['conditions']:
-                    u_value = initial_data['conditions']['u']['value']
-                    initial_loss += tf.reduce_mean(tf.square(velocities[:, 0] - u_value))
+                # Get shapes of each coordinate and verify consistency
+                x_shape = np.asarray(x_data).shape
+                y_shape = np.asarray(y_data).shape
+                t_shape = np.asarray(t_data).shape
                 
-                if 'v' in initial_data['conditions']:
-                    v_value = initial_data['conditions']['v']['value']
-                    initial_loss += tf.reduce_mean(tf.square(velocities[:, 1] - v_value))
+                # Check if shapes match
+                if x_shape != y_shape or x_shape != t_shape:
+                    print(f"Warning: Coordinate shape mismatch in initial condition '{ic_name}':")
+                    print(f"  x shape: {x_shape}, y shape: {y_shape}, t shape: {t_shape}")
+                    print(f"  Attempting to process anyway by flattening all arrays.")
                 
-                if 'p' in initial_data['conditions'] and initial_data['conditions']['p'] is not None:
-                    p_value = initial_data['conditions']['p']['value']
-                    initial_loss += tf.reduce_mean(tf.square(pressure - p_value))
+                # Convert to tensors with proper flattening
+                x_tensor = tf.reshape(tf.convert_to_tensor(x_data, dtype=tf.float32), [-1, 1])
+                y_tensor = tf.reshape(tf.convert_to_tensor(y_data, dtype=tf.float32), [-1, 1])
+                t_tensor = tf.reshape(tf.convert_to_tensor(t_data, dtype=tf.float32), [-1, 1])
+                
+                # Verify all tensors have the same first dimension after reshaping
+                x_size = int(x_tensor.shape[0])
+                y_size = int(y_tensor.shape[0])
+                t_size = int(t_tensor.shape[0])
+                
+                # Handle dimension mismatches - Use numpy and Python conditionals instead of tensor ops
+                if x_size != y_size or x_size != t_size:
+                    print(f"Warning: After reshaping, point counts don't match in '{ic_name}':")
+                    print(f"  x: {x_size}, y: {y_size}, t: {t_size}")
+                    
+                    # Try to make them match by repeating smaller tensors to match the largest
+                    max_size = max(x_size, y_size, t_size)
+                    
+                    # Adjust x tensor if needed
+                    if x_size == 1 and max_size > 1:
+                        x_tensor = tf.repeat(x_tensor, max_size, axis=0)
+                    elif x_size != max_size:
+                        print(f"  Cannot automatically resize x tensor from {x_size} to {max_size}. Skipping.")
+                        continue
+                        
+                    # Adjust y tensor if needed
+                    if y_size == 1 and max_size > 1:
+                        y_tensor = tf.repeat(y_tensor, max_size, axis=0)
+                    elif y_size != max_size:
+                        print(f"  Cannot automatically resize y tensor from {y_size} to {max_size}. Skipping.")
+                        continue
+                        
+                    # Adjust t tensor if needed
+                    if t_size == 1 and max_size > 1:
+                        t_tensor = tf.repeat(t_tensor, max_size, axis=0)
+                    elif t_size != max_size:
+                        print(f"  Cannot automatically resize t tensor from {t_size} to {max_size}. Skipping.")
+                        continue
+                
+                # Concatenate coordinate tensors
+                input_tensor = tf.concat([x_tensor, y_tensor, t_tensor], axis=1)
+                
+                # Get model predictions
+                predictions = self.model.model(input_tensor, training=True)
+                
+                # Extract predicted components
+                velocities = predictions[:, :2]
+                pressure = predictions[:, -1]
+                
+                pred_u = tf.reshape(velocities[:, 0], [-1])
+                pred_v = tf.reshape(velocities[:, 1], [-1])
+                pred_p = tf.reshape(pressure, [-1])
+                
+                # Apply initial conditions and compute loss
+                conditions = initial_data.get('conditions', {})
+                if not conditions:
+                    print(f"Warning: No conditions specified for initial condition '{ic_name}'. Skipping.")
+                    continue
+                
+                # Process each condition
+                for var_name, pred_tensor in [('u', pred_u), ('v', pred_v), ('p', pred_p)]:
+                    if var_name in conditions and conditions[var_name] is not None:
+                        var_cond = conditions[var_name]
+                        if 'value' in var_cond:
+                            target_val = var_cond['value']
+                            try:
+                                # Convert target to tensor
+                                target_tensor = tf.convert_to_tensor(target_val, dtype=tf.float32)
+                                
+                                # Handle scalar targets
+                                if len(target_tensor.shape) == 0:  # Use len() instead of tf.rank
+                                    pred_size = int(pred_tensor.shape[0])
+                                    target_tensor = tf.fill([pred_size], target_tensor)
+                                else:
+                                    target_tensor = tf.reshape(target_tensor, [-1])
+                                
+                                # Check shapes match - Use Python operations on tensor shapes
+                                pred_shape = pred_tensor.shape
+                                target_shape = target_tensor.shape
+                                
+                                if pred_shape[0] == target_shape[0]:
+                                    # Compute and add loss
+                                    var_loss = tf.reduce_mean(tf.square(pred_tensor - target_tensor))
+                                    initial_loss += var_loss
+                                else:
+                                    print(f"Warning: Shape mismatch for '{var_name}' in initial condition '{ic_name}':")
+                                    print(f"  Prediction shape: {pred_shape}, Target shape: {target_shape}")
+                            except Exception as e:
+                                print(f"Warning: Error processing '{var_name}' in initial condition '{ic_name}': {str(e)}")
+                                continue
 
             except Exception as e:
-                print(f"Warning: Error processing initial condition {var_name}: {str(e)}")
+                print(f"Warning: Error processing initial condition '{ic_name}': {str(e)}")
+                import traceback
+                traceback.print_exc() # Print detailed traceback for debugging
                 continue
 
         return initial_loss

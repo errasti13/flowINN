@@ -211,155 +211,172 @@ class TimeWindowTrainer:
     def _generate_spatial_temporal_batches(self, mesh, num_spatial_batches, num_temporal_batches, 
                                    add_noise=True, noise_level=0.01):
         """
-        Generate batches by dividing both spatial and temporal domains into smaller chunks.
+        Generate batches by dividing both spatial and temporal domains into smaller chunks using CuPy.
         This dramatically reduces memory usage compared to standard batching.
         
         Args:
-            mesh: The mesh object containing coordinates
+            mesh: The mesh object containing coordinates (assumed NumPy)
             num_spatial_batches: Number of spatial batches to divide the domain into
             num_temporal_batches: Number of temporal batches to divide the time domain into
             add_noise: Whether to add small noise to coordinates for regularization
             noise_level: Level of noise to add
             
         Returns:
-            List of batches, each containing coordinates for training
+            List of TensorFlow Tensors, each containing coordinates for training
         """
-        # Get coordinates
-        x_flat = mesh.x.flatten()
-        y_flat = mesh.y.flatten() 
-        t_values = mesh.t.flatten() if hasattr(mesh, 't') else np.zeros_like(x_flat)
-        
-        # Calculate batch sizes
-        num_spatial_points = len(x_flat)
-        num_temporal_points = len(t_values)
-        
-        # Special case: if both spatial and temporal batches are 1, use all points
-        if num_spatial_batches == 1 and num_temporal_batches == 1:
-            # Create combinations of all spatial and temporal points
-            print(f"Using all {num_spatial_points} spatial points and {num_temporal_points} time points")
-            
-            # For memory efficiency, we'll generate a reasonable number of combinations
-            # rather than a full Cartesian product which could be too large
-            
-            # Calculate how many time points we can use with all spatial points
-            # to stay under max_points
+        # --- Convert initial mesh data to CuPy arrays ---
+        try:
+            x_flat_cp = cp.asarray(mesh.x.ravel(), dtype=cp.float32)
+            y_flat_cp = cp.asarray(mesh.y.ravel(), dtype=cp.float32)
+            # Ensure t_values_cp is created even if mesh.t is None
+            t_values_cp = cp.asarray(mesh.t.ravel(), dtype=cp.float32) if hasattr(mesh, 't') and mesh.t is not None else cp.zeros(x_flat_cp.shape[0], dtype=cp.float32)
+        except Exception as e:
+            print(f"Error converting mesh data to CuPy in _generate_spatial_temporal_batches: {e}")
+            raise TypeError("Failed to convert mesh data to CuPy arrays.") from e
 
-            # Use all spatial points but sample from time points
-            print(f"Using all spatial points with sampled time points to fit memory constraints")
-            time_samples = max(3, num_temporal_points)
-            print(f"Using all {num_spatial_points} spatial points with {time_samples} time samples")
-            
-            # Sample time points with preference for earlier times (for causality)
-            # Use weighted sampling that favors earlier time points
-            weights = np.linspace(1.0, 0.5, num_temporal_points)  # Higher weight for earlier times
-            selected_t_indices = np.random.choice(
-                range(num_temporal_points), 
-                size=time_samples, 
-                replace=False, 
-                p=weights/np.sum(weights)
-            )
-            selected_t = t_values[selected_t_indices]
-            
-            # Create combinations with all spatial points and selected time points
-            batch_coords = []
-            for t_val in selected_t:
-                for i in range(num_spatial_points):
-                    batch_coords.append([x_flat[i], y_flat[i], t_val])
-            
-            # Convert to numpy array
-            batch_coords = np.array(batch_coords, dtype=np.float32)
-            
-            # Add small noise for regularization if requested
-            if add_noise:
-                # Calculate noise scale for each dimension
-                x_range = np.max(x_flat) - np.min(x_flat)
-                y_range = np.max(y_flat) - np.min(y_flat)
-                t_range = np.max(t_values) - np.min(t_values) if len(t_values) > 1 else 1.0
-                
-                # Add scaled noise to each dimension
-                batch_coords[:, 0] += np.random.normal(0, noise_level * x_range, batch_coords.shape[0])
-                batch_coords[:, 1] += np.random.normal(0, noise_level * y_range, batch_coords.shape[0])
-                # Don't add noise to temporal dimension to preserve causality
-            
-            batches = [tf.convert_to_tensor(batch_coords, dtype=tf.float32)]
-            print(f"Generated 1 spatial-temporal batch with {len(batch_coords)} points")
-            return batches
-        
-        # Regular case with multiple batches
-        # Define spatial batch size
-        spatial_points_per_batch = max(10, num_spatial_points // num_spatial_batches)
-        
-        # Define temporal batch size
-        temporal_points_per_batch = max(3, num_temporal_points // num_temporal_batches)
-        
-        # Track total batches
+        # Get sizes using CuPy
+        num_spatial_points = x_flat_cp.size
+        num_temporal_points = t_values_cp.size
+
+        if num_temporal_points == 0:
+            print("Warning: No time points provided for batch generation.")
+            return []
+
         batches = []
         
-        # Generate combined spatial-temporal batches
+        # Special case: if both spatial and temporal batches are 1, use all points with sampling
+        if num_spatial_batches == 1 and num_temporal_batches == 1:
+            print(f"Using all {num_spatial_points} spatial points with sampled time points")
+            
+            # Decide on number of time samples (e.g., based on memory or just a fixed number)
+            time_samples = min(num_temporal_points, 100) # Limit time samples
+            print(f"Sampling {time_samples} time points.")
+
+            # Sample time points using CuPy
+            if num_temporal_points > time_samples:
+                 # Simple random choice if many points
+                 selected_t_indices = cp.random.choice(num_temporal_points, size=time_samples, replace=False)
+            else:
+                 # Use all points if fewer than target samples
+                 selected_t_indices = cp.arange(num_temporal_points, dtype=cp.int32)
+            selected_t = t_values_cp[selected_t_indices]
+            
+            # Create combinations efficiently using CuPy meshgrid and stacking
+            # We need to combine all x, all y with selected t
+            # Use cp.tile and cp.repeat for efficient combination
+            num_selected_t = selected_t.shape[0]
+            
+            tiled_x = cp.tile(x_flat_cp, num_selected_t)
+            tiled_y = cp.tile(y_flat_cp, num_selected_t)
+            repeated_t = cp.repeat(selected_t, num_spatial_points)
+            
+            batch_coords_cp = cp.stack([tiled_x, tiled_y, repeated_t], axis=-1)
+
+            # Add noise using CuPy if requested
+            if add_noise and batch_coords_cp.size > 0:
+                x_range = cp.ptp(x_flat_cp) if x_flat_cp.size > 1 else cp.array(1.0, dtype=cp.float32) # Peak-to-peak (range) using CuPy
+                y_range = cp.ptp(y_flat_cp) if y_flat_cp.size > 1 else cp.array(1.0, dtype=cp.float32)
+                noise_shape = batch_coords_cp.shape[0]
+                batch_coords_cp[:, 0] += cp.random.normal(0, noise_level * x_range, size=noise_shape, dtype=cp.float32)
+                batch_coords_cp[:, 1] += cp.random.normal(0, noise_level * y_range, size=noise_shape, dtype=cp.float32)
+                # No noise added to time dimension
+            
+            # Convert final CuPy array to NumPy, then to TensorFlow Tensor
+            try:
+                batch_coords_np = cp.asnumpy(batch_coords_cp)
+                batches.append(tf.convert_to_tensor(batch_coords_np, dtype=tf.float32))
+                print(f"Generated 1 spatial-temporal batch with {batch_coords_cp.shape[0]} points")
+            except Exception as conversion_e:
+                print(f"Error converting single large batch from CuPy to Tensor: {conversion_e}")
+            
+            return batches
+
+        # Regular case with multiple batches
+        spatial_points_per_batch = max(10, num_spatial_points // num_spatial_batches)
+        temporal_points_per_batch = max(3, num_temporal_points // num_temporal_batches)
+
+        # Generate combined spatial-temporal batches using CuPy
         for t_batch in range(num_temporal_batches):
-            # Select temporal chunk
             t_start_idx = t_batch * temporal_points_per_batch
             t_end_idx = min(t_start_idx + temporal_points_per_batch, num_temporal_points)
-            
-            # Handle edge case for last batch
-            if t_batch == num_temporal_batches - 1:
+            if t_batch == num_temporal_batches - 1: # Ensure last batch covers remaining points
                 t_end_idx = num_temporal_points
-            
-            # Get time values for this batch
-            if num_temporal_points > 1:
-                batch_t_indices = np.random.choice(
-                    range(t_start_idx, t_end_idx),
-                    size=min(temporal_points_per_batch, t_end_idx - t_start_idx),
-                    replace=(t_end_idx - t_start_idx < temporal_points_per_batch)
-                )
-                batch_t_values = t_values[batch_t_indices]
-            else:
-                batch_t_values = t_values
-            
+
+            num_t_in_chunk = t_end_idx - t_start_idx
+            if num_t_in_chunk <= 0: continue # Skip if chunk is empty
+
+            # Sample time points for this chunk using CuPy
+            replace_t = num_t_in_chunk < temporal_points_per_batch
+            t_indices_in_chunk = cp.random.choice(
+                cp.arange(t_start_idx, t_end_idx, dtype=cp.int32), 
+                size=min(temporal_points_per_batch, num_t_in_chunk), 
+                replace=replace_t
+            )
+            batch_t_values = t_values_cp[t_indices_in_chunk]
+
+            if batch_t_values.size == 0: continue # Skip if no time values selected
+
             for s_batch in range(num_spatial_batches):
-                # Generate random spatial indices for this batch
-                spatial_indices = np.random.choice(
-                    num_spatial_points,
-                    size=spatial_points_per_batch,
-                    replace=(num_spatial_points < spatial_points_per_batch)
+                # Sample spatial indices for this batch using CuPy
+                replace_s = num_spatial_points < spatial_points_per_batch
+                spatial_indices = cp.random.choice(
+                    num_spatial_points, 
+                    size=spatial_points_per_batch, 
+                    replace=replace_s
                 )
                 
-                # Get coordinates for these indices
-                batch_x = x_flat[spatial_indices]
-                batch_y = y_flat[spatial_indices]
+                # Get spatial coordinates using CuPy indexing
+                batch_x = x_flat_cp[spatial_indices]
+                batch_y = y_flat_cp[spatial_indices]
+
+                # Create combinations using CuPy meshgrid and stacking
+                # Limit time points per spatial batch for memory
+                num_time_points_in_batch = min(10, batch_t_values.size)
+                if num_time_points_in_batch <= 0 : continue # Ensure we have time points
                 
-                # Create all combinations of spatial and temporal coordinates
-                # This uses a memory-efficient approach to avoid large meshgrids
-                batch_coords = []
+                # Use replace=False if possible, otherwise True
+                replace_t_sample = batch_t_values.size < num_time_points_in_batch
+                selected_t = cp.random.choice(batch_t_values, size=num_time_points_in_batch, replace=replace_t_sample)
+
+                if selected_t.size == 0: continue # Skip if no time points after sampling
                 
-                # Only keep a random subset of time points to reduce size
-                num_time_points = min(10, len(batch_t_values))
-                selected_t = np.random.choice(batch_t_values, size=num_time_points, replace=False)
+                # CuPy meshgrid for coords
+                # Shapes: (spatial_batch_size, time_samples)
+                xx, tt = cp.meshgrid(batch_x, selected_t, indexing='ij')
+                # Need yy to match shape, use repeat
+                # Shape: (spatial_batch_size, 1) -> (spatial_batch_size, time_samples)
+                yy = cp.repeat(batch_y[:, cp.newaxis], selected_t.size, axis=1)
                 
-                # Add points to batch
-                for t_val in selected_t:
-                    for i in range(len(batch_x)):
-                        batch_coords.append([batch_x[i], batch_y[i], t_val])
+                # Ravel and stack
+                # Shape: (spatial_batch_size * time_samples, 3)
+                batch_coords_cp = cp.stack([xx.ravel(), yy.ravel(), tt.ravel()], axis=-1)
+
+                # Ensure correct dtype
+                batch_coords_cp = batch_coords_cp.astype(cp.float32)
                 
-                # Convert to numpy array
-                batch_coords = np.array(batch_coords, dtype=np.float32)
-                
-                # Add small noise for regularization if requested
-                if add_noise:
-                    # Calculate noise scale for each dimension
-                    x_range = np.max(x_flat) - np.min(x_flat)
-                    y_range = np.max(y_flat) - np.min(y_flat)
-                    t_range = np.max(t_values) - np.min(t_values) if len(t_values) > 1 else 1.0
+                # Add noise using CuPy if requested
+                if add_noise and batch_coords_cp.size > 0:
+                    x_range = cp.ptp(x_flat_cp) if x_flat_cp.size > 1 else cp.array(1.0, dtype=cp.float32)
+                    y_range = cp.ptp(y_flat_cp) if y_flat_cp.size > 1 else cp.array(1.0, dtype=cp.float32)
+                    noise_shape = batch_coords_cp.shape[0]
                     
-                    # Add scaled noise to each dimension
-                    batch_coords[:, 0] += np.random.normal(0, noise_level * x_range, batch_coords.shape[0])
-                    batch_coords[:, 1] += np.random.normal(0, noise_level * y_range, batch_coords.shape[0])
-                    # Don't add noise to temporal dimension to preserve causality
-                
-                # Add the batch to the list
-                batches.append(tf.convert_to_tensor(batch_coords, dtype=tf.float32))
-                
-        print(f"Generated {len(batches)} spatial-temporal batches")
+                    batch_coords_cp[:, 0] += cp.random.normal(0, noise_level * x_range, size=noise_shape, dtype=cp.float32)
+                    batch_coords_cp[:, 1] += cp.random.normal(0, noise_level * y_range, size=noise_shape, dtype=cp.float32)
+                    # No noise added to time dimension
+
+                if batch_coords_cp.size == 0:
+                    print(f"Warning: Batch t{t_batch+1}/s{s_batch+1} is empty.")
+                    continue # Skip empty batch
+
+                # Convert final CuPy array to NumPy, then to TensorFlow Tensor
+                try:
+                    batch_coords_np = cp.asnumpy(batch_coords_cp)
+                    batches.append(tf.convert_to_tensor(batch_coords_np, dtype=tf.float32))
+                except Exception as conversion_e:
+                    print(f"Error converting batch t{t_batch+1}/s{s_batch+1} from CuPy to Tensor: {conversion_e}")
+                    continue # Optionally skip this batch
+
+        print(f"Generated {len(batches)} spatial-temporal batches using CuPy")
         return batches
 
     def train(self, model, loss_function, mesh, tRange, epochs=None, 
@@ -594,8 +611,6 @@ class TimeWindowTrainer:
                 'patience': patience,
                 'min_delta': min_delta,
                 'time_window_size': time_window_size,
-                'add_noise': True,
-                'noise_level': 0.005 * (0.9 ** window_idx),
                 'physics_points': num_physics_points,
                 'adaptive_sampling': adaptive_sampling,
                 'use_cpu': use_cpu,

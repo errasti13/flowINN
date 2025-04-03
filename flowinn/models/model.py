@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from typing import List, Optional, Tuple
 from flowinn.plot.boundary_visualization import BoundaryVisualization
 from flowinn.nn.architectures import FourierFeatureLayer
+import random # Import Python's random module for list shuffling
 
 class PINN:
     """
@@ -158,133 +159,152 @@ class PINN:
         """Generate batches using CuPy for GPU acceleration."""
         batches = []
 
-        # --- Convert mesh data to CuPy arrays --- 
-        # Assuming mesh.x, mesh.y, etc. are NumPy arrays or similar
-        x_flat = cp.asarray(mesh.x.ravel())
-        y_flat = cp.asarray(mesh.y.ravel())
-        z_flat = None if mesh.is2D else cp.asarray(mesh.z.ravel())
-        t_coords = cp.asarray(mesh.t) if hasattr(mesh, 't') and mesh.t is not None else None
+        # --- Convert mesh data to CuPy arrays ---
+        # Ensure conversion happens correctly at the start
+        try:
+            x_flat = cp.asarray(mesh.x.ravel(), dtype=cp.float32)
+            y_flat = cp.asarray(mesh.y.ravel(), dtype=cp.float32)
+            z_flat = None if mesh.is2D else cp.asarray(mesh.z.ravel(), dtype=cp.float32)
+            t_coords = cp.asarray(mesh.t, dtype=cp.float32) if hasattr(mesh, 't') and mesh.t is not None else None
+            is_unsteady = hasattr(mesh, 'is_unsteady') and mesh.is_unsteady and t_coords is not None
+        except Exception as e:
+            print(f"Error converting mesh data to CuPy arrays: {e}")
+            # Fallback or raise error? For now, raise to highlight the issue.
+            raise TypeError("Failed to convert mesh data to CuPy arrays.") from e
 
-        if hasattr(mesh, 'is_unsteady') and mesh.is_unsteady and t_coords is not None:
-            spatial_points = len(x_flat)
-            time_points = len(t_coords)
-            
+        if is_unsteady:
+            spatial_points = x_flat.size # Use .size for CuPy arrays
+            time_points = t_coords.size
+
+            if time_points == 0:
+                 print("Warning: No time points found in mesh.t for unsteady batch generation.")
+                 return [] # Cannot generate batches without time
+
             time_window_size = min(time_window_size, time_points)
-            
+            if time_window_size <= 0:
+                time_window_size = 1 # Ensure at least one time step
+
             total_points = spatial_points * time_points
-            points_per_batch = total_points // num_batches
-            
-            # Use cp.sqrt here if needed
-            points_per_spatial_dim = int(cp.sqrt(max(1, points_per_batch // time_window_size)))
-            
+            # Ensure points_per_batch is at least 1
+            points_per_batch = max(1, total_points // num_batches)
+
+            # Estimate spatial points needed, ensure positive result
+            points_per_spatial_dim = int(cp.sqrt(max(1.0, float(points_per_batch) / time_window_size)))
+            points_per_spatial_dim = max(1, points_per_spatial_dim) # Ensure at least 1
+
             num_windows = num_batches
-            
+
             for batch_idx in range(num_batches):
-                # --- Use CuPy for random sampling --- 
+                # --- Use CuPy for random sampling ---
                 x_indices = cp.random.choice(spatial_points, size=points_per_spatial_dim, replace=True)
                 y_indices = cp.random.choice(spatial_points, size=points_per_spatial_dim, replace=True)
-                
-                if num_windows > 1:
-                    max_start_idx = time_points - time_window_size
+
+                # Determine time window indices using CuPy
+                max_start_idx = time_points - time_window_size
+                if num_windows > 1 and max_start_idx > 0:
+                    # Calculate start index proportionally
                     window_start = int((batch_idx / (num_windows - 1)) * max_start_idx)
+                    # Ensure window_start is within bounds
+                    window_start = cp.clip(window_start, 0, max_start_idx).item() # .item() to get scalar
                 else:
                     window_start = 0
-                
-                # --- Use CuPy arange --- 
-                t_indices = cp.arange(window_start, min(window_start + time_window_size, time_points))
-                
-                # Pre-allocate CuPy array for efficiency if possible, otherwise build list
-                # Calculation of exact size might be complex, list append might be easier
-                batch_coords_list = [] 
-                
-                for t_idx in t_indices:
-                    t_val = t_coords[t_idx] 
-                    
-                    for i in range(points_per_spatial_dim):
-                        for j in range(points_per_spatial_dim):
-                            x_idx = x_indices[i]
-                            y_idx = y_indices[j]
-                            
-                            x_val = x_flat[x_idx]
-                            y_val = y_flat[y_idx]
-                            
-                            batch_coords_list.append([x_val, y_val, t_val])
-                
-                # --- Convert list of CuPy scalars/arrays to a single CuPy array --- 
-                # Need to handle the conversion carefully depending on list content type
-                # If list contains CuPy scalars, converting directly might work
-                # If it contains lists/tuples, cp.array might be needed
-                # Stacking might be necessary if elements are arrays themselves
-                if batch_coords_list:
-                    # Assuming append adds lists like [cp.float32, cp.float32, cp.float32]
-                    # Let's try cp.array first
-                    try:
-                         # Use cp.stack if append added arrays, cp.array if scalars/lists
-                         # Example assumes list of lists of scalars
-                        batch_coords_cp = cp.array(batch_coords_list, dtype=cp.float32) 
-                    except TypeError: 
-                        # Fallback if direct conversion fails (e.g., list contains mixed types)
-                        # Convert elements individually? This might be slow.
-                        # Consider creating numpy first then converting? cp.asarray(np.array(...))
-                        # For now, let's assume cp.array works for list of [scalar, scalar, scalar]
-                        print("Warning: Direct CuPy array creation from list failed. Check data types.")
-                        # As a robust fallback, convert via numpy
-                        batch_coords_np_temp = np.array(cp.asnumpy(cp.array(batch_coords_list)).tolist(), dtype=np.float32)
-                        batch_coords_cp = cp.asarray(batch_coords_np_temp)
 
-                    if len(batch_coords_cp) > points_per_batch:
-                        # --- Use CuPy random choice for subsetting ---
-                        indices = cp.random.choice(len(batch_coords_cp), points_per_batch, replace=False)
-                        batch_coords_cp = batch_coords_cp[indices]
-                else:
-                     batch_coords_cp = cp.empty((0, 3), dtype=cp.float32) # Handle empty case
+                # Ensure end index doesn't exceed time_points
+                window_end = min(window_start + time_window_size, time_points)
+                # Use CuPy arange for indices
+                t_indices = cp.arange(window_start, window_end, dtype=cp.int32)
 
-                # --- Convert final CuPy array to NumPy for TensorFlow --- 
-                batch_coords_np = cp.asnumpy(batch_coords_cp)
-                batch_tensor = tf.convert_to_tensor(batch_coords_np, dtype=tf.float32)
-                
-                batches.append(batch_tensor)
+                # Check if t_indices is empty
+                if t_indices.size == 0:
+                    print(f"Warning: Skipping batch {batch_idx+1} due to empty time window.")
+                    continue
+
+                # --- Efficiently build coordinates using CuPy broadcasting ---
+                # Get sampled spatial coordinates
+                sampled_x = x_flat[x_indices]
+                sampled_y = y_flat[y_indices]
+
+                # Get sampled temporal coordinates
+                sampled_t = t_coords[t_indices]
+
+                # Create meshgrid using CuPy
+                # Shapes: (spatial_dim, spatial_dim, time_window)
+                xx, yy, tt = cp.meshgrid(sampled_x, sampled_y, sampled_t, indexing='ij')
+
+                # Stack coordinates: Result shape (spatial_dim * spatial_dim * time_window, 3)
+                batch_coords_cp = cp.stack([xx.ravel(), yy.ravel(), tt.ravel()], axis=-1)
+
+                # Ensure correct data type
+                batch_coords_cp = batch_coords_cp.astype(cp.float32)
+
+                # Limit batch size if needed using CuPy indexing
+                current_batch_size = batch_coords_cp.shape[0]
+                if current_batch_size > points_per_batch:
+                    indices = cp.random.choice(current_batch_size, size=points_per_batch, replace=False)
+                    batch_coords_cp = batch_coords_cp[indices]
+                elif current_batch_size == 0:
+                    print(f"Warning: Batch {batch_idx+1} is empty after coordinate generation.")
+                    continue # Skip empty batch
+
+                # --- Convert final CuPy array to NumPy for TensorFlow ---
+                try:
+                    batch_coords_np = cp.asnumpy(batch_coords_cp)
+                    batch_tensor = tf.convert_to_tensor(batch_coords_np, dtype=tf.float32)
+                    batches.append(batch_tensor)
+                except Exception as conversion_e:
+                    print(f"Error converting batch {batch_idx+1} from CuPy to Tensor: {conversion_e}")
+                    # Optionally skip this batch or raise error
+                    continue
+
         else:
-            # --- Steady State Logic (needs similar CuPy conversion) --- 
-            total_points = len(x_flat)
-            points_per_batch = total_points // num_batches
-            
-            # --- Use CuPy sqrt/cbrt --- 
-            points_per_dim = int(cp.sqrt(points_per_batch) if mesh.is2D else cp.cbrt(points_per_batch))
+            # --- Steady State Logic (using CuPy) ---
+            total_points = x_flat.size
+            points_per_batch = max(1, total_points // num_batches) # Ensure at least 1
+
+            # Use CuPy sqrt/cbrt, ensure float for division, handle potential zero points
+            points_per_dim_float = cp.power(float(points_per_batch), 1.0/mesh.input_dim) if points_per_batch > 0 else 0.0
+            points_per_dim = max(1, int(points_per_dim_float)) # Ensure at least 1
 
             for _ in range(num_batches):
-                if mesh.is2D:
-                    x_indices = cp.random.choice(len(x_flat), size=points_per_dim, replace=True)
-                    y_indices = cp.random.choice(len(y_flat), size=points_per_dim, replace=True)
-                    
-                    # --- Use CuPy meshgrid --- 
-                    xx_idx, yy_idx = cp.meshgrid(x_indices, y_indices)
-                    all_indices = cp.stack([xx_idx.flatten(), yy_idx.flatten()], axis=1)
-                    
-                    x_coords = x_flat[all_indices[:, 0]]
-                    y_coords = y_flat[all_indices[:, 1]]
-                    batch_coords_cp = cp.stack([x_coords, y_coords], axis=1).astype(cp.float32)
-                else: # 3D case
-                    x_indices = cp.random.choice(len(x_flat), size=points_per_dim, replace=True)
-                    y_indices = cp.random.choice(len(y_flat), size=points_per_dim, replace=True)
-                    z_indices = cp.random.choice(len(z_flat), size=points_per_dim, replace=True)
-                    
-                    xx_idx, yy_idx, zz_idx = cp.meshgrid(x_indices, y_indices, z_indices)
-                    all_indices = cp.stack([xx_idx.flatten(), yy_idx.flatten(), zz_idx.flatten()], axis=1)
-                    
-                    x_coords = x_flat[all_indices[:, 0]]
-                    y_coords = y_flat[all_indices[:, 1]]
-                    z_coords = z_flat[all_indices[:, 2]]
-                    batch_coords_cp = cp.stack([x_coords, y_coords, z_coords], axis=1).astype(cp.float32)
-                
-                # Limit batch size
-                batch_coords_cp = batch_coords_cp[:points_per_batch]
-                
-                # --- Convert final CuPy array to NumPy for TensorFlow --- 
-                batch_coords_np = cp.asnumpy(batch_coords_cp)
-                batch_tensor = tf.convert_to_tensor(batch_coords_np, dtype=tf.float32)
-                
-                batches.append(batch_tensor)
+                # Generate indices using CuPy
+                indices_list = [cp.random.choice(s.size, size=points_per_dim, replace=True)
+                                for s in [x_flat, y_flat] + ([] if mesh.is2D else [z_flat])]
+
+                # Use CuPy meshgrid for indices
+                meshgrid_indices = cp.meshgrid(*indices_list, indexing='ij')
+
+                # Stack indices and get coordinates
+                all_indices = cp.stack([idx.ravel() for idx in meshgrid_indices], axis=-1)
+
+                coords_list = [
+                    x_flat[all_indices[:, 0]],
+                    y_flat[all_indices[:, 1]]
+                ]
+                if not mesh.is2D:
+                    coords_list.append(z_flat[all_indices[:, 2]])
+
+                batch_coords_cp = cp.stack(coords_list, axis=-1).astype(cp.float32)
+
+                # Limit batch size using CuPy slicing/indexing
+                current_batch_size = batch_coords_cp.shape[0]
+                if current_batch_size > points_per_batch:
+                     # Efficiently sample using CuPy
+                    indices = cp.random.choice(current_batch_size, size=points_per_batch, replace=False)
+                    batch_coords_cp = batch_coords_cp[indices]
+                elif current_batch_size == 0:
+                    print(f"Warning: Steady-state batch is empty.")
+                    continue # Skip empty batch
+
+
+                # --- Convert final CuPy array to NumPy for TensorFlow ---
+                try:
+                    batch_coords_np = cp.asnumpy(batch_coords_cp)
+                    batch_tensor = tf.convert_to_tensor(batch_coords_np, dtype=tf.float32)
+                    batches.append(batch_tensor)
+                except Exception as conversion_e:
+                     print(f"Error converting steady-state batch from CuPy to Tensor: {conversion_e}")
+                     continue
+
 
         return batches
 
@@ -426,8 +446,8 @@ class PINN:
                 if batch_data is not None and len(batch_data) > 0:
                     # Use pre-generated batches (memory efficient)
                     batches = batch_data
-                    # Shuffle batches for each epoch
-                    np.random.shuffle(batches)
+                    # Shuffle batches (which is a List[tf.Tensor]) using Python's random
+                    random.shuffle(batches)
                 else:
                     # Generate batches on-the-fly
                     batches = self.generate_batches(
