@@ -367,7 +367,7 @@ class TimeWindowTrainer:
              use_cpu=False, save_name=None, window_overlap=0.1, 
              physics_points_ratio=10, adaptive_sampling=True, memory_limit=None,
              monitor_memory=True, num_spatial_batches=4, num_temporal_batches=3,
-             patience = 100):
+             patience = 100, min_delta = 1e-7):
         """
         Train the model using the moving time window approach.
         
@@ -592,7 +592,7 @@ class TimeWindowTrainer:
                 'num_batches': num_batches,
                 'plot_loss': False,
                 'patience': patience,
-                'min_delta': 1e-7,
+                'min_delta': min_delta,
                 'time_window_size': time_window_size,
                 'add_noise': True,
                 'noise_level': 0.005 * (0.9 ** window_idx),
