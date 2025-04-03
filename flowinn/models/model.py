@@ -154,7 +154,7 @@ class PINN:
             staircase=False
         )
 
-    def generate_batches(self, mesh, num_batches, time_window_size=3, noise_level=0.01):
+    def generate_batches(self, mesh, num_batches, time_window_size=3):
         """Generate batches using CuPy for GPU acceleration."""
         batches = []
 
@@ -302,8 +302,8 @@ class PINN:
               domain_range: Optional[Tuple[Tuple[float, float], Tuple[float, float]]] = None,
               airfoil_coords: Optional[Tuple[np.ndarray, np.ndarray]] = None,
               output_dir: str = 'bc_plots', patience: int = 10000, min_delta: float = 1e-6,
-              time_window_size: int = 5, add_noise: bool = True, noise_level: float = 0.01,
-              use_cpu: bool = False, batch_data: Optional[List[tf.Tensor]] = None) -> None:
+              time_window_size: int = 5, use_cpu: bool = False, 
+              batch_data: Optional[List[tf.Tensor]] = None) -> None:
         """
         Train the model using the provided loss function.
         
@@ -321,9 +321,7 @@ class PINN:
             output_dir: Directory for output plots
             patience: Patience for early stopping
             min_delta: Minimum improvement for early stopping
-            time_window_size: Size of temporal window for unsteady problems
-            add_noise: Whether to add small noise to training points
-            noise_level: Level of noise to add (fraction of domain range)
+            time_window_size: Size of temporal window for unsteady problems)
             use_cpu: Force CPU usage (set to True if GPU/CUDA errors occur)
             batch_data: Pre-generated batches for memory-efficient training
         """
@@ -336,7 +334,7 @@ class PINN:
                     print_interval, autosave_interval, plot_loss, 
                     bc_plot_interval, domain_range, airfoil_coords, 
                     output_dir, patience, min_delta, time_window_size, 
-                    add_noise, noise_level, batch_data
+                     batch_data
                 )
         else:
             try:
@@ -346,7 +344,7 @@ class PINN:
                     print_interval, autosave_interval, plot_loss, 
                     bc_plot_interval, domain_range, airfoil_coords, 
                     output_dir, patience, min_delta, time_window_size, 
-                    add_noise, noise_level, batch_data
+                    batch_data
                 )
             except (tf.errors.ResourceExhaustedError, tf.errors.InternalError, 
                    tf.errors.FailedPreconditionError) as e:
@@ -382,14 +380,14 @@ class PINN:
                         print_interval, autosave_interval, plot_loss, 
                         bc_plot_interval, domain_range, airfoil_coords, 
                         output_dir, patience, min_delta, time_window_size, 
-                        add_noise, noise_level, batch_data
+                        batch_data
                     )
 
     def _train_implementation(self, loss_function, mesh, epochs, num_batches,
                           print_interval, autosave_interval, plot_loss, 
                           bc_plot_interval, domain_range, airfoil_coords,
                           output_dir, patience, min_delta, time_window_size, 
-                          add_noise, noise_level, batch_data=None):
+                          batch_data=None):
         """Implementation of the training process, separated for device context management."""
         import time
         
@@ -435,9 +433,7 @@ class PINN:
                     batches = self.generate_batches(
                         mesh, 
                         num_batches, 
-                        time_window_size=time_window_size,
-                        add_noise=add_noise,
-                        noise_level=noise_level
+                        time_window_size=time_window_size
                     )
                 
                 # Train on batches
