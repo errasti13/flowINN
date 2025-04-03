@@ -514,7 +514,7 @@ class PINN:
                     plt.draw()
                     plt.pause(0.001)
 
-                print(f"Epoch {epoch + 1}: Loss = {epoch_loss:.6f}, Time = {epoch_time:.2f}s, Avg Time = {avg_time:.2f}s")
+                print(f"Epoch {epoch + 1}: Loss = {epoch_loss:.4e}, Time = {epoch_time:.2f}s, Avg Time = {avg_time:.2f}s")
             
             if self.boundary_visualizer is not None and bc_plot_interval is not None and (epoch + 1) % bc_plot_interval == 0:
                 self.boundary_visualizer.plot_boundary_conditions(
