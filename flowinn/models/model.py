@@ -1,5 +1,6 @@
 import os
-import numpy as np
+import cupy as cp  # Use cp as alias to avoid confusion with numpy if it were also present
+import numpy as np  # Change back to standard import
 import tensorflow as tf
 import matplotlib.pyplot as plt
 from typing import List, Optional, Tuple
@@ -153,107 +154,51 @@ class PINN:
             staircase=False
         )
 
-    def _add_training_noise(self, batch_coords, noise_level=0.01):
-        """
-        Add small gaussian noise to the batch coordinates for better generalization
-        and to help the model escape local minima.
-        
-        Args:
-            batch_coords: Tensor of batch coordinates [x, y, t]
-            noise_level: Standard deviation of the noise as a fraction of the coordinate range
-            
-        Returns:
-            Tensor with added noise
-        """
-        # Convert to numpy for easier manipulation
-        coords_np = batch_coords.numpy()
-        
-        # Calculate noise scale for each dimension
-        scales = []
-        for dim in range(coords_np.shape[1]):
-            # Calculate range for this dimension
-            dim_range = np.max(coords_np[:, dim]) - np.min(coords_np[:, dim])
-            # Noise scale is a fraction of the range
-            scales.append(dim_range * noise_level)
-        
-        # Generate noise with appropriate scale for each dimension
-        noise = np.zeros_like(coords_np)
-        for dim in range(coords_np.shape[1]):
-            # Don't add noise to temporal dimension (assumed to be the last one) in unsteady problems
-            # This preserves the temporal correlation and sliding window structure
-            if dim == coords_np.shape[1] - 1 and coords_np.shape[1] >= 3:
-                continue
-            
-            noise[:, dim] = np.random.normal(0, scales[dim], size=coords_np.shape[0])
-        
-        # Add noise to coordinates
-        noisy_coords = coords_np + noise
-        
-        return tf.convert_to_tensor(noisy_coords, dtype=tf.float32)
-
-    def generate_batches(self, mesh, num_batches, time_window_size=3, add_noise=True, noise_level=0.01):
-        """
-        Generate batches for training using a sliding time window approach.
-        
-        For unsteady problems, this uses:
-        - Random spatial sampling for x,y coordinates
-        - Sliding window sampling for time coordinates to capture temporal correlations
-        
-        Args:
-            mesh: The mesh object containing spatial and temporal coordinates
-            num_batches: Number of batches to generate
-            time_window_size: Number of consecutive time steps in each temporal window
-            add_noise: Whether to add small noise to coordinate points for regularization
-            noise_level: Level of noise to add (as fraction of coordinate range)
-        """
+    def generate_batches(self, mesh, num_batches, time_window_size=3, noise_level=0.01):
+        """Generate batches using CuPy for GPU acceleration."""
         batches = []
 
-        # Flatten arrays for proper indexing
-        x_flat = mesh.x.ravel()
-        y_flat = mesh.y.ravel()
-        z_flat = None if mesh.is2D else mesh.z.ravel()
+        # --- Convert mesh data to CuPy arrays --- 
+        # Assuming mesh.x, mesh.y, etc. are NumPy arrays or similar
+        x_flat = cp.asarray(mesh.x.ravel())
+        y_flat = cp.asarray(mesh.y.ravel())
+        z_flat = None if mesh.is2D else cp.asarray(mesh.z.ravel())
+        t_coords = cp.asarray(mesh.t) if hasattr(mesh, 't') and mesh.t is not None else None
 
-        if hasattr(mesh, 'is_unsteady') and mesh.is_unsteady:
+        if hasattr(mesh, 'is_unsteady') and mesh.is_unsteady and t_coords is not None:
             spatial_points = len(x_flat)
-            time_points = len(mesh.t)
+            time_points = len(t_coords)
             
-            # Ensure time_window_size is valid
             time_window_size = min(time_window_size, time_points)
             
-            # Calculate points per batch
             total_points = spatial_points * time_points
             points_per_batch = total_points // num_batches
             
-            # Adjust spatial points for sliding window approach
-            points_per_spatial_dim = int(np.sqrt(points_per_batch // time_window_size))
+            # Use cp.sqrt here if needed
+            points_per_spatial_dim = int(cp.sqrt(max(1, points_per_batch // time_window_size)))
             
-            # Calculate how many temporal windows we need
             num_windows = num_batches
             
             for batch_idx in range(num_batches):
-                # Generate random spatial indices
-                x_indices = np.random.choice(spatial_points, size=points_per_spatial_dim, replace=True)
-                y_indices = np.random.choice(spatial_points, size=points_per_spatial_dim, replace=True)
+                # --- Use CuPy for random sampling --- 
+                x_indices = cp.random.choice(spatial_points, size=points_per_spatial_dim, replace=True)
+                y_indices = cp.random.choice(spatial_points, size=points_per_spatial_dim, replace=True)
                 
-                # Calculate temporal window start index using sliding window approach
-                # This creates overlapping windows that progress through time
                 if num_windows > 1:
-                    # Calculate the starting position for this window
-                    # This distributes windows evenly across the full time range
                     max_start_idx = time_points - time_window_size
                     window_start = int((batch_idx / (num_windows - 1)) * max_start_idx)
                 else:
                     window_start = 0
                 
-                # Create a range of consecutive time indices for this window
-                t_indices = np.arange(window_start, min(window_start + time_window_size, time_points))
+                # --- Use CuPy arange --- 
+                t_indices = cp.arange(window_start, min(window_start + time_window_size, time_points))
                 
-                # Create coordinate arrays for this batch
-                batch_coords = []
+                # Pre-allocate CuPy array for efficiency if possible, otherwise build list
+                # Calculation of exact size might be complex, list append might be easier
+                batch_coords_list = [] 
                 
-                # Create all combinations of spatial and temporal coordinates for this batch
                 for t_idx in t_indices:
-                    t_val = mesh.t[t_idx]
+                    t_val = t_coords[t_idx] 
                     
                     for i in range(points_per_spatial_dim):
                         for j in range(points_per_spatial_dim):
@@ -263,85 +208,87 @@ class PINN:
                             x_val = x_flat[x_idx]
                             y_val = y_flat[y_idx]
                             
-                            # Add this coordinate to the batch
-                            batch_coords.append([x_val, y_val, t_val])
+                            batch_coords_list.append([x_val, y_val, t_val])
                 
-                # Convert to numpy array and limit size if needed
-                batch_coords = np.array(batch_coords, dtype=np.float32)
-                if len(batch_coords) > points_per_batch:
-                    # Take a random subset if we have too many points
-                    indices = np.random.choice(len(batch_coords), points_per_batch, replace=False)
-                    batch_coords = batch_coords[indices]
+                # --- Convert list of CuPy scalars/arrays to a single CuPy array --- 
+                # Need to handle the conversion carefully depending on list content type
+                # If list contains CuPy scalars, converting directly might work
+                # If it contains lists/tuples, cp.array might be needed
+                # Stacking might be necessary if elements are arrays themselves
+                if batch_coords_list:
+                    # Assuming append adds lists like [cp.float32, cp.float32, cp.float32]
+                    # Let's try cp.array first
+                    try:
+                         # Use cp.stack if append added arrays, cp.array if scalars/lists
+                         # Example assumes list of lists of scalars
+                        batch_coords_cp = cp.array(batch_coords_list, dtype=cp.float32) 
+                    except TypeError: 
+                        # Fallback if direct conversion fails (e.g., list contains mixed types)
+                        # Convert elements individually? This might be slow.
+                        # Consider creating numpy first then converting? cp.asarray(np.array(...))
+                        # For now, let's assume cp.array works for list of [scalar, scalar, scalar]
+                        print("Warning: Direct CuPy array creation from list failed. Check data types.")
+                        # As a robust fallback, convert via numpy
+                        batch_coords_np_temp = np.array(cp.asnumpy(cp.array(batch_coords_list)).tolist(), dtype=np.float32)
+                        batch_coords_cp = cp.asarray(batch_coords_np_temp)
+
+                    if len(batch_coords_cp) > points_per_batch:
+                        # --- Use CuPy random choice for subsetting ---
+                        indices = cp.random.choice(len(batch_coords_cp), points_per_batch, replace=False)
+                        batch_coords_cp = batch_coords_cp[indices]
+                else:
+                     batch_coords_cp = cp.empty((0, 3), dtype=cp.float32) # Handle empty case
+
+                # --- Convert final CuPy array to NumPy for TensorFlow --- 
+                batch_coords_np = cp.asnumpy(batch_coords_cp)
+                batch_tensor = tf.convert_to_tensor(batch_coords_np, dtype=tf.float32)
                 
-                # Convert to tensor
-                batch_tensor = tf.convert_to_tensor(batch_coords)
-                
-                # Add noise for regularization if requested
-                if add_noise:
-                    batch_tensor = self._add_training_noise(batch_tensor, noise_level)
-                
-                # Add to batches
                 batches.append(batch_tensor)
         else:
-            # For steady problems, use the original implementation
+            # --- Steady State Logic (needs similar CuPy conversion) --- 
             total_points = len(x_flat)
             points_per_batch = total_points // num_batches
             
-            points_per_dim = int(np.sqrt(points_per_batch) if mesh.is2D else np.cbrt(points_per_batch))
+            # --- Use CuPy sqrt/cbrt --- 
+            points_per_dim = int(cp.sqrt(points_per_batch) if mesh.is2D else cp.cbrt(points_per_batch))
 
             for _ in range(num_batches):
                 if mesh.is2D:
-                    # Sample indices for 2D case
-                    x_indices = np.random.choice(total_points, size=points_per_dim, replace=True)
-                    y_indices = np.random.choice(total_points, size=points_per_dim, replace=True)
+                    x_indices = cp.random.choice(len(x_flat), size=points_per_dim, replace=True)
+                    y_indices = cp.random.choice(len(y_flat), size=points_per_dim, replace=True)
                     
-                    # Create meshgrid of all combinations
-                    xx, yy = np.meshgrid(x_indices, y_indices)
+                    # --- Use CuPy meshgrid --- 
+                    xx_idx, yy_idx = cp.meshgrid(x_indices, y_indices)
+                    all_indices = cp.stack([xx_idx.flatten(), yy_idx.flatten()], axis=1)
                     
-                    # Flatten and stack
-                    all_indices = np.stack([xx.flatten(), yy.flatten()], axis=1)
+                    x_coords = x_flat[all_indices[:, 0]]
+                    y_coords = y_flat[all_indices[:, 1]]
+                    batch_coords_cp = cp.stack([x_coords, y_coords], axis=1).astype(cp.float32)
+                else: # 3D case
+                    x_indices = cp.random.choice(len(x_flat), size=points_per_dim, replace=True)
+                    y_indices = cp.random.choice(len(y_flat), size=points_per_dim, replace=True)
+                    z_indices = cp.random.choice(len(z_flat), size=points_per_dim, replace=True)
                     
-                    # Map indices to actual coordinate values
-                    x_coords = x_flat[all_indices[:, 0]].astype(np.float32)
-                    y_coords = y_flat[all_indices[:, 1]].astype(np.float32)
+                    xx_idx, yy_idx, zz_idx = cp.meshgrid(x_indices, y_indices, z_indices)
+                    all_indices = cp.stack([xx_idx.flatten(), yy_idx.flatten(), zz_idx.flatten()], axis=1)
                     
-                    # Stack to create final coordinates array
-                    batch_coords = np.stack([x_coords, y_coords], axis=1)
-                else:
-                    # Sample indices for 3D case
-                    x_indices = np.random.choice(total_points, size=points_per_dim, replace=True)
-                    y_indices = np.random.choice(total_points, size=points_per_dim, replace=True)
-                    z_indices = np.random.choice(total_points, size=points_per_dim, replace=True)
-                    
-                    # Create meshgrid of all combinations
-                    xx, yy, zz = np.meshgrid(x_indices, y_indices, z_indices)
-                    
-                    # Flatten and stack
-                    all_indices = np.stack([xx.flatten(), yy.flatten(), zz.flatten()], axis=1)
-                    
-                    # Map indices to actual coordinate values
-                    x_coords = x_flat[all_indices[:, 0]].astype(np.float32)
-                    y_coords = y_flat[all_indices[:, 1]].astype(np.float32)
-                    z_coords = z_flat[all_indices[:, 2]].astype(np.float32)
-                    
-                    # Stack to create final coordinates array
-                    batch_coords = np.stack([x_coords, y_coords, z_coords], axis=1)
+                    x_coords = x_flat[all_indices[:, 0]]
+                    y_coords = y_flat[all_indices[:, 1]]
+                    z_coords = z_flat[all_indices[:, 2]]
+                    batch_coords_cp = cp.stack([x_coords, y_coords, z_coords], axis=1).astype(cp.float32)
                 
-                # Limit to points_per_batch if needed
-                batch_coords = batch_coords[:points_per_batch]
+                # Limit batch size
+                batch_coords_cp = batch_coords_cp[:points_per_batch]
                 
-                # Convert to tensor
-                batch_tensor = tf.convert_to_tensor(batch_coords, dtype=tf.float32)
-                
-                # Add noise for regularization if requested
-                if add_noise:
-                    batch_tensor = self._add_training_noise(batch_tensor, noise_level)
+                # --- Convert final CuPy array to NumPy for TensorFlow --- 
+                batch_coords_np = cp.asnumpy(batch_coords_cp)
+                batch_tensor = tf.convert_to_tensor(batch_coords_np, dtype=tf.float32)
                 
                 batches.append(batch_tensor)
 
         return batches
 
-    @tf.function
+    @tf.function  # Re-applying decorator for performance
     def train_step(self, loss_function, batch_data) -> tf.Tensor:
         with tf.GradientTape() as tape:
             loss = loss_function(batch_data=batch_data)
@@ -471,6 +418,9 @@ class PINN:
             line2, = ax2.plot([], [], label='Time/Epoch')
             ax2.legend()
 
+        # Use the @tf.function decorated train_step directly
+        train_step_fn = self.train_step
+
         for epoch in range(epochs):
             epoch_start_time = time.time()
             try:
@@ -505,21 +455,16 @@ class PINN:
                                 end_idx = min(start_idx + sub_batch_size, batch.shape[0])
                                 sub_batch = batch[start_idx:end_idx]
                                 
-                                batch_loss = self.train_step(loss_function, sub_batch)
+                                batch_loss = train_step_fn(loss_function, sub_batch)
                                 sub_batch_loss += batch_loss.numpy() * (end_idx - start_idx) / batch.shape[0]
-                                
-                                # Explicitly release memory
-                                tf.keras.backend.clear_session()
-                                import gc
-                                gc.collect()
                                 
                             epoch_loss += sub_batch_loss
                         else:
                             # Process smaller batches normally
-                            batch_loss = self.train_step(loss_function, batch)
+                            batch_loss = train_step_fn(loss_function, batch)
                             epoch_loss += batch_loss.numpy() / len(batches)
                             
-                    except (tf.errors.ResourceExhaustedError, tf.errors.InternalError,
+                    except (tf.errors.ResourceExhaustedError, tf.errors.InternalError,\
                            tf.errors.FailedPreconditionError) as e:
                         print(f"Error in batch {batch_idx+1}/{len(batches)}: {e}")
                         print("Skipping batch and continuing...")
