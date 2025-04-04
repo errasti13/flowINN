@@ -441,10 +441,6 @@ class TimeWindowTrainer:
                 }
                 print(f"Set initial conditions at t={window_start} from {num_boundary_samples} boundary samples")
             
-            # Adjust time window size for batching
-            time_window_size = min(20, len(mesh.t) // 4)
-            time_window_size = max(3, time_window_size)  # Ensure at least 3 time steps
-            
             # Calculate number of physics points
             if num_spatial_batches == 1 and num_temporal_batches == 1:
                 # When using all points, set physics points to match the full mesh
@@ -461,7 +457,6 @@ class TimeWindowTrainer:
             
             print(f"\nTraining configuration:")
             print(f"Mesh size: {len(mesh.x)} spatial points x {len(mesh.t)} time points")
-            print(f"Time window size: {time_window_size} steps")
             print(f"Number of physics points: {num_physics_points}")
             print(f"Spatial batches: {num_spatial_batches}, Temporal batches: {num_temporal_batches}")
             
@@ -481,7 +476,6 @@ class TimeWindowTrainer:
                 'plot_loss': False,
                 'patience': patience,
                 'min_delta': min_delta,
-                'time_window_size': time_window_size,
                 'use_cpu': use_cpu
             }
             
