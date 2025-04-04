@@ -8,6 +8,21 @@ from flowinn.plot.boundary_visualization import BoundaryVisualization
 from flowinn.nn.architectures import FourierFeatureLayer
 import random # Import Python's random module for list shuffling
 
+class VariableLearningRate(tf.keras.optimizers.schedules.LearningRateSchedule):
+    """Custom learning rate schedule that wraps a Variable to make it compatible with optimizers."""
+    
+    def __init__(self, lr_variable):
+        super().__init__()
+        self.lr_variable = lr_variable
+    
+    def __call__(self, step):
+        # Simply return the variable's value (TF will track dependencies)
+        return self.lr_variable
+    
+    def get_config(self):
+        # Required for serialization
+        return {"lr_variable": self.lr_variable}
+
 class PINN:
     """
     Physics-Informed Neural Network (PINN) class with a Modified Fourier Network (MFN) architecture.
@@ -26,7 +41,8 @@ class PINN:
             learning_rate: Initial learning rate
             eq: Equation identifier
         """
-        self.learning_rate = learning_rate
+        # Store learning rate as a Variable for easier updates
+        self.learning_rate = tf.Variable(learning_rate, dtype=tf.float32, trainable=False, name='learning_rate')
         self.activation = activation
         
         # Check if input_shape is a tuple or an integer
@@ -38,8 +54,14 @@ class PINN:
         # Build the model with a Fourier feature mapping layer at the start
         self.model: tf.keras.Sequential = self.create_model(self.input_dim, output_shape, layers, activation)
         self.model.summary()
+        
+        # Create a learning rate wrapper that makes the Variable compatible with optimizer
+        lr_schedule = VariableLearningRate(self.learning_rate)
+        
+        # Use the wrapped Variable as the learning rate
         self.optimizer: tf.keras.optimizers.Adam = tf.keras.optimizers.Adam(
-            learning_rate=self.learning_rate_schedule(learning_rate))
+            learning_rate=lr_schedule)
+        
         self.eq: str = eq
         self.boundary_visualizer: Optional[BoundaryVisualization] = None
 
@@ -625,10 +647,20 @@ class PINN:
             # Save the underlying Keras model
             self.model.save(save_path)
             
+            # Convert learning rate Variable to float for JSON serialization
+            if hasattr(self.learning_rate, 'numpy'):
+                lr_value = float(self.learning_rate.numpy())
+            elif hasattr(self.learning_rate, 'lr_variable') and hasattr(self.learning_rate.lr_variable, 'numpy'):
+                # Handle case of VariableLearningRate wrapper
+                lr_value = float(self.learning_rate.lr_variable.numpy())
+            else:
+                # Fallback: try direct conversion
+                lr_value = float(self.learning_rate)
+            
             # Save additional metadata that isn't captured by Keras save
             metadata = {
                 'activation': self.activation,
-                'learning_rate': self.learning_rate,
+                'learning_rate': lr_value,
                 'input_dim': self.input_dim,
                 'eq': self.eq,
                 'architecture_type': 'pinn',
@@ -646,6 +678,8 @@ class PINN:
             return True
         except Exception as e:
             print(f"Error saving model: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def load(self, model_name: str) -> None:
@@ -679,7 +713,15 @@ class PINN:
                     
                     # Update object attributes from metadata
                     self.activation = metadata.get('activation', self.activation)
-                    self.learning_rate = metadata.get('learning_rate', self.learning_rate)
+                    
+                    # Handle learning rate - update the Variable if we have one
+                    lr_value = metadata.get('learning_rate', 0.001)
+                    if hasattr(self, 'learning_rate') and hasattr(self.learning_rate, 'assign'):
+                        self.learning_rate.assign(lr_value)
+                    else:
+                        # Create a new Variable if needed
+                        self.learning_rate = tf.Variable(lr_value, dtype=tf.float32, trainable=False, name='learning_rate')
+                    
                     self.input_dim = metadata.get('input_dim', self.model.input_shape[-1])
                     self.eq = metadata.get('eq', model_name)
                     
@@ -691,9 +733,9 @@ class PINN:
                 self.input_dim = self.model.input_shape[-1]
                 print("No metadata file found. Using basic model information.")
             
-            # Always recompile the optimizer to ensure it's properly initialized
-            self.optimizer = tf.keras.optimizers.Adam(
-                learning_rate=self.learning_rate_schedule(self.learning_rate))
+            # Always recompile the optimizer using the VariableLearningRate wrapper
+            lr_schedule = VariableLearningRate(self.learning_rate)
+            self.optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
             
             print(f"Model successfully loaded")
             
@@ -720,7 +762,15 @@ class PINN:
                         
                         # Update object attributes from metadata
                         self.activation = metadata.get('activation', self.activation)
-                        self.learning_rate = metadata.get('learning_rate', self.learning_rate)
+                        
+                        # Handle learning rate - update the Variable if we have one
+                        lr_value = metadata.get('learning_rate', 0.001)
+                        if hasattr(self, 'learning_rate') and hasattr(self.learning_rate, 'assign'):
+                            self.learning_rate.assign(lr_value)
+                        else:
+                            # Create a new Variable if needed
+                            self.learning_rate = tf.Variable(lr_value, dtype=tf.float32, trainable=False, name='learning_rate')
+                        
                         self.input_dim = metadata.get('input_dim', self.model.input_shape[-1])
                         self.eq = metadata.get('eq', model_name)
                         
@@ -732,9 +782,9 @@ class PINN:
                     self.input_dim = self.model.input_shape[-1]
                     print("No metadata file found. Using basic model information.")
                 
-                # Always recompile the optimizer to ensure it's properly initialized
-                self.optimizer = tf.keras.optimizers.Adam(
-                    learning_rate=self.learning_rate_schedule(self.learning_rate))
+                # Always recompile the optimizer using the VariableLearningRate wrapper
+                lr_schedule = VariableLearningRate(self.learning_rate)
+                self.optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
                 
                 print(f"Model successfully loaded on CPU")
                 
