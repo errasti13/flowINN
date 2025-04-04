@@ -159,7 +159,7 @@ def create_mfn_model(input_shape, output_shape, eq, activation='gelu', fourier_d
     # Import PINN here to avoid circular import
     from flowinn.models.model import PINN
     
-    # Create a standard PINN model
+    # Create a standard PINN model with a Variable learning rate
     pinn_model = PINN(
         input_shape=input_shape,
         output_shape=output_shape,
@@ -169,18 +169,11 @@ def create_mfn_model(input_shape, output_shape, eq, activation='gelu', fourier_d
         learning_rate=learning_rate
     )
     
-    # Replace the default model with our MFN architecture
-    # Get the Keras backend model
-    keras_model = pinn_model.model
-    
     # Create new MFN model - more efficient design
     input_layer = layers.Input(shape=input_shape)
     
     # Direct Fourier feature mapping (more efficient)
     x = FourierFeatureLayer(fourier_dim, trainable=trainable_fourier)(input_layer)
-    
-    # Skip the additional dense layers after Fourier mapping
-    # This significantly reduces computational cost
     
     # Core network
     for units in layer_sizes:

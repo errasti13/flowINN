@@ -70,146 +70,49 @@ class TimeWindowTrainer:
             learning_rate: New learning rate value (float)
         """
         try:
+            # First try to update model's own learning_rate Variable attribute
+            if hasattr(model, 'learning_rate') and hasattr(model.learning_rate, 'assign'):
+                model.learning_rate.assign(learning_rate)
+                print(f"Model learning_rate Variable assigned to {learning_rate:.8f}")
+                return
+             
+            # If we reach here, try optimizer's learning_rate
             optimizer = model.optimizer
             
             if hasattr(optimizer, 'learning_rate'):
                 lr_object = optimizer.learning_rate
+                
+                # Handle our custom VariableLearningRate class
+                if hasattr(lr_object, 'lr_variable') and hasattr(lr_object.lr_variable, 'assign'):
+                    lr_object.lr_variable.assign(learning_rate)
+                    print(f"Learning rate assigned via VariableLearningRate to {learning_rate:.8f}")
+                    return
+                
+                # Standard assign if available
                 if hasattr(lr_object, 'assign'):
-                    # Best case: Assign directly if it's assignable (like a tf.Variable or some schedules)
                     lr_object.assign(learning_rate)
                     print(f"Learning rate assigned to {learning_rate:.8f}")
-                else:
-                    # Fallback: Try setting value using backend if direct assign fails
-                    # This might work for simple tensors or some schedule objects
-                    try:
-                        tf.keras.backend.set_value(lr_object, learning_rate)
-                        print(f"Learning rate set via backend to {learning_rate:.8f}")
-                    except Exception as e_setval:
-                        print(f"Warning: Could not assign or set_value learning rate ({e_setval}). Optimizer replacement may occur (risk of tf.function errors).")
-                        # Last Resort (Risky): Recreate optimizer - try to avoid this
-                        # config = optimizer.get_config()
-                        # config['learning_rate'] = learning_rate
-                        # model.optimizer = type(optimizer).from_config(config)
-                        # print(f"Optimizer recreated with learning rate {learning_rate:.8f}")
-                        # Force build the new optimizer IF it was replaced, outside tf.function
-                        # if not optimizer.built:
-                        #    optimizer.build(model.model.trainable_variables)
-            else:
-                 print(f"Warning: Optimizer {type(optimizer)} has no 'learning_rate' attribute.")
-                 # Fallback: Create a new optimizer if LR can't be accessed/set
-                 model.optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
-                 print(f"Created new Adam optimizer with learning rate {learning_rate:.8f}")
-                 # Force build the new optimizer
-                 # model.optimizer.build(model.model.trainable_variables)
+                    return
+                    
+                # Try backend set_value as a fallback
+                try:
+                    tf.keras.backend.set_value(lr_object, learning_rate)
+                    print(f"Learning rate set via backend to {learning_rate:.8f}")
+                    return
+                except Exception as e_setval:
+                    print(f"Warning: Could not update learning rate ({e_setval}). Creating new optimizer.")
+            
+            # If we get here, create a new optimizer as last resort
+            print(f"Creating new Adam optimizer with learning rate {learning_rate:.8f}")
+            model.optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
 
         except Exception as e:
             print(f"Error setting learning rate: {str(e)}")
             print(f"Attempting to create new Adam optimizer with learning rate {learning_rate:.8f}")
             # Ensure recreation on any error
             model.optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
-            # Force build the new optimizer
-            # model.optimizer.build(model.model.trainable_variables) # Build needs variables
-
-    def _get_supported_train_params(self, model, all_params):
-        """
-        Determine which parameters are supported by the model's train method.
-        
-        Args:
-            model: The model to train
-            all_params: Dictionary of all available parameters
             
-        Returns:
-            Dictionary containing only the parameters supported by model.train()
-        """
-        # Default parameters that should be available in most train methods
-        default_params = [
-            'loss_function', 'mesh', 'epochs', 'print_interval', 
-            'autosave_interval', 'num_batches', 'plot_loss'
-        ]
-        
-        # Try to get the signature of the train method
-        try:
-            if hasattr(model, 'train') and callable(model.train):
-                # Get the signature of the train method
-                sig = inspect.signature(model.train)
-                
-                # Get the parameter names
-                param_names = list(sig.parameters.keys())
-                
-                # Filter params to include only those in the signature
-                # First parameter is usually 'self', so skip it
-                supported_params = {}
-                for name in param_names[1:]:  # Skip 'self'
-                    if name in all_params:
-                        supported_params[name] = all_params[name]
-                
-                # Ensure loss_function is included if it's a required parameter
-                if 'loss_function' in param_names and 'loss_function' not in supported_params:
-                    supported_params['loss_function'] = all_params['loss_function']
-                
-                # Fix for loss_function: if it's an object with a loss_function method, use that method
-                if 'loss_function' in supported_params:
-                    loss_func = supported_params['loss_function']
-                    if hasattr(loss_func, 'loss_function') and callable(loss_func.loss_function):
-                        supported_params['loss_function'] = loss_func.loss_function
-                
-                return supported_params
-            else:
-                # If train method doesn't exist, use default parameters
-                return {k: v for k, v in all_params.items() if k in default_params}
-        except (TypeError, ValueError):
-            # If we can't inspect the signature, use default parameters
-            return {k: v for k, v in all_params.items() if k in default_params}
-
-    def _monitor_memory(self):
-        """
-        Monitor GPU memory usage and print statistics.
-        """
-        try:
-            # Try to get TensorFlow memory info
-            gpus = tf.config.experimental.list_physical_devices('GPU')
-            if not gpus:
-                print("No GPUs available for memory monitoring")
-                return
-
-            # Try to get memory info for the first GPU
-            try:
-                memory_info = tf.config.experimental.get_memory_info('GPU:0')
-                if memory_info:
-                    print("\nGPU Memory Usage:")
-                    print(f"  Current allocated: {memory_info['current'] / (1024**2):.1f} MB")
-                    print(f"  Peak allocated: {memory_info['peak'] / (1024**2):.1f} MB")
-                    print(f"  Free memory: {memory_info['free'] / (1024**2):.1f} MB")
-                    return
-            except:
-                # TF memory info not available, try using NVML
-                pass
-
-            # Try using nvidia-smi through subprocess
-            try:
-                import subprocess
-                result = subprocess.run(['nvidia-smi', '--query-gpu=memory.used,memory.free,memory.total', '--format=csv,noheader,nounits'], 
-                                       stdout=subprocess.PIPE, 
-                                       text=True)
-                if result.returncode == 0:
-                    memory_used, memory_free, memory_total = map(int, result.stdout.strip().split(','))
-                    print("\nGPU Memory Usage (nvidia-smi):")
-                    print(f"  Used: {memory_used} MB")
-                    print(f"  Free: {memory_free} MB")
-                    print(f"  Total: {memory_total} MB")
-                    print(f"  Utilization: {memory_used/memory_total*100:.1f}%")
-                    return
-            except:
-                # nvidia-smi not available or failed
-                pass
-
-            # If all methods failed, use generic message
-            print("\nGPU memory monitoring not available")
-        except Exception as e:
-            print(f"Memory monitoring error: {str(e)}")
-            
-    def _generate_spatial_temporal_batches(self, mesh, num_spatial_batches, num_temporal_batches, 
-                                   add_noise=True, noise_level=0.01):
+    def _generate_spatial_temporal_batches(self, mesh, num_spatial_batches, num_temporal_batches):
         """
         Generate batches by dividing both spatial and temporal domains into smaller chunks using CuPy.
         This dramatically reduces memory usage compared to standard batching.
@@ -218,8 +121,6 @@ class TimeWindowTrainer:
             mesh: The mesh object containing coordinates (assumed NumPy)
             num_spatial_batches: Number of spatial batches to divide the domain into
             num_temporal_batches: Number of temporal batches to divide the time domain into
-            add_noise: Whether to add small noise to coordinates for regularization
-            noise_level: Level of noise to add
             
         Returns:
             List of TensorFlow Tensors, each containing coordinates for training
@@ -248,14 +149,10 @@ class TimeWindowTrainer:
         if num_spatial_batches == 1 and num_temporal_batches == 1:
             print(f"Using all {num_spatial_points} spatial points with sampled time points")
             
-            # Decide on number of time samples (e.g., based on memory or just a fixed number)
-            time_samples = min(num_temporal_points, 100) # Limit time samples
-            print(f"Sampling {time_samples} time points.")
-
             # Sample time points using CuPy
-            if num_temporal_points > time_samples:
+            if num_temporal_points > num_temporal_points:
                  # Simple random choice if many points
-                 selected_t_indices = cp.random.choice(num_temporal_points, size=time_samples, replace=False)
+                 selected_t_indices = cp.random.choice(num_temporal_points, size=num_temporal_points, replace=False)
             else:
                  # Use all points if fewer than target samples
                  selected_t_indices = cp.arange(num_temporal_points, dtype=cp.int32)
@@ -271,15 +168,6 @@ class TimeWindowTrainer:
             repeated_t = cp.repeat(selected_t, num_spatial_points)
             
             batch_coords_cp = cp.stack([tiled_x, tiled_y, repeated_t], axis=-1)
-
-            # Add noise using CuPy if requested
-            if add_noise and batch_coords_cp.size > 0:
-                x_range = cp.ptp(x_flat_cp) if x_flat_cp.size > 1 else cp.array(1.0, dtype=cp.float32) # Peak-to-peak (range) using CuPy
-                y_range = cp.ptp(y_flat_cp) if y_flat_cp.size > 1 else cp.array(1.0, dtype=cp.float32)
-                noise_shape = batch_coords_cp.shape[0]
-                batch_coords_cp[:, 0] += cp.random.normal(0, noise_level * x_range, size=noise_shape, dtype=cp.float32)
-                batch_coords_cp[:, 1] += cp.random.normal(0, noise_level * y_range, size=noise_shape, dtype=cp.float32)
-                # No noise added to time dimension
             
             # Convert final CuPy array to NumPy, then to TensorFlow Tensor
             try:
@@ -292,8 +180,8 @@ class TimeWindowTrainer:
             return batches
 
         # Regular case with multiple batches
-        spatial_points_per_batch = max(10, num_spatial_points // num_spatial_batches)
-        temporal_points_per_batch = max(3, num_temporal_points // num_temporal_batches)
+        spatial_points_per_batch  = num_spatial_points  // num_spatial_batches
+        temporal_points_per_batch = num_temporal_points // num_temporal_batches
 
         # Generate combined spatial-temporal batches using CuPy
         for t_batch in range(num_temporal_batches):
@@ -353,16 +241,6 @@ class TimeWindowTrainer:
 
                 # Ensure correct dtype
                 batch_coords_cp = batch_coords_cp.astype(cp.float32)
-                
-                # Add noise using CuPy if requested
-                if add_noise and batch_coords_cp.size > 0:
-                    x_range = cp.ptp(x_flat_cp) if x_flat_cp.size > 1 else cp.array(1.0, dtype=cp.float32)
-                    y_range = cp.ptp(y_flat_cp) if y_flat_cp.size > 1 else cp.array(1.0, dtype=cp.float32)
-                    noise_shape = batch_coords_cp.shape[0]
-                    
-                    batch_coords_cp[:, 0] += cp.random.normal(0, noise_level * x_range, size=noise_shape, dtype=cp.float32)
-                    batch_coords_cp[:, 1] += cp.random.normal(0, noise_level * y_range, size=noise_shape, dtype=cp.float32)
-                    # No noise added to time dimension
 
                 if batch_coords_cp.size == 0:
                     print(f"Warning: Batch t{t_batch+1}/s{s_batch+1} is empty.")
@@ -382,8 +260,8 @@ class TimeWindowTrainer:
     def train(self, model, loss_function, mesh, tRange, epochs=None, 
              print_interval=100, autosave_interval=10000, num_batches=10, 
              use_cpu=False, save_name=None, window_overlap=0.1, 
-             physics_points_ratio=10, adaptive_sampling=True, memory_limit=None,
-             monitor_memory=True, num_spatial_batches=4, num_temporal_batches=3,
+             physics_points_ratio=10, adaptive_sampling=True,
+             num_spatial_batches=4, num_temporal_batches=3,
              patience = 100, min_delta = 1e-7):
         """
         Train the model using the moving time window approach.
@@ -402,16 +280,9 @@ class TimeWindowTrainer:
             window_overlap: Fraction of overlap between windows (0.0-1.0)
             physics_points_ratio: Ratio of physics points to mesh points
             adaptive_sampling: Whether to use adaptive sampling of collocation points
-            memory_limit: GPU memory limit in MB (None for no limit)
-            monitor_memory: Whether to monitor and print GPU memory usage
             num_spatial_batches: Number of batches to divide spatial domain into
             num_temporal_batches: Number of batches to divide temporal domain into
         """            
-        # Monitor initial memory usage
-        if monitor_memory and not use_cpu:
-            print("\nInitial GPU memory state:")
-            self._monitor_memory()
-            
         # Timing and setup
         start_time = time.time()
         
@@ -488,7 +359,7 @@ class TimeWindowTrainer:
                 print(f"Initial learning rate: {current_lr:.6f}")
             
             # Generate time points for this window - more points at boundaries
-            num_time_points = 100  # Can be adjusted
+            num_time_points = len(mesh.t)
             
             # Use non-linear spacing for better resolution at boundaries
             beta = 1.5  # Controls clustering at boundaries
@@ -611,11 +482,12 @@ class TimeWindowTrainer:
                 'patience': patience,
                 'min_delta': min_delta,
                 'time_window_size': time_window_size,
-                'physics_points': num_physics_points,
-                'adaptive_sampling': adaptive_sampling,
-                'use_cpu': use_cpu,
-                'callbacks': callbacks if 'callbacks' in locals() else None
+                'use_cpu': use_cpu
             }
+            
+            # Add callbacks if available
+            if 'callbacks' in locals() and callbacks is not None:
+                all_params['callbacks'] = callbacks
             
             # Generate spatial-temporal batches if batch_data parameter is supported
             if 'batch_data' in inspect.signature(model.train).parameters:
@@ -623,18 +495,17 @@ class TimeWindowTrainer:
                 batches = self._generate_spatial_temporal_batches(
                     mesh, 
                     num_spatial_batches, 
-                    num_temporal_batches,
-                    add_noise=True,
-                    noise_level=0.005 * (0.9 ** window_idx)  # Decreasing noise level
+                    num_temporal_batches
                 )
                 all_params['batch_data'] = batches
             
-            # Get only the parameters supported by the model.train method
-            supported_params = self._get_supported_train_params(model, all_params)
-            
             # Train the model for this time window
             try:
-                # Use only supported parameters
+                # Get only the supported parameters for the model's train method
+                model_train_params = inspect.signature(model.train).parameters
+                supported_params = {k: v for k, v in all_params.items() if k in model_train_params}
+                
+                # Train the model using only supported parameters
                 history = model.train(**supported_params)
                 
                 # Save window history
@@ -672,11 +543,6 @@ class TimeWindowTrainer:
             
             # Store epoch time
             self.training_history['epoch_times'].append(window_time)
-            
-            # After training, monitor memory if requested
-            if monitor_memory and not use_cpu:
-                print(f"\nGPU memory after window {window_idx+1}:")
-                self._monitor_memory()
         
         # Restore original time range for later prediction
         if original_t is not None:
