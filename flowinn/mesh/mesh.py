@@ -34,6 +34,19 @@ class Mesh:
         self.meshio: Optional[MeshIO] = None
         self.is_unsteady = False
 
+    @property
+    def input_dim(self) -> int:
+        """
+        Returns the input dimension for the neural network model.
+        For 2D meshes, this is 2 (x,y); for 3D meshes, this is 3 (x,y,z).
+        If the mesh is unsteady, adds 1 for the time dimension.
+        
+        Returns:
+            int: The input dimension
+        """
+        base_dim = 2 if self.is2D else 3
+        return base_dim + (1 if self.is_unsteady else 0)
+
     def _create_meshio(self) -> None:
         """
         Creates a MeshIO instance if it doesn't exist.
