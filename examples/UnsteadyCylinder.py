@@ -9,8 +9,7 @@ def main():
     parser.add_argument('--epochs', type=int, default=100, help='Number of training epochs')
     parser.add_argument('--print-interval', type=int, default=1, help='Print interval during training')
     parser.add_argument('--autosave-interval', type=int, default=1000, help='Model autosave interval')
-    parser.add_argument('--num-batches', type=int, default=4, help='Number of batches per epoch')
-    parser.add_argument('--use-cpu', action='store_true', help='Force CPU usage for training')
+    parser.add_argument('--num-batches', type=int, default=1, help='Number of batches per epoch')
     parser.add_argument('--load-model', action='store_true', help='Load pre-trained model')
     parser.add_argument('--predict-only', action='store_true', help='Skip training and only run prediction')
     parser.add_argument('--spatial-batches', type=int, default=1, help='Number of spatial batches')
@@ -24,14 +23,13 @@ def main():
     case_name = "UnsteadyCylinder"
     x_range = (-4.0, 8.0)  # Domain length
     y_range = (-4.0, 4.0)  # Domain height
-    t_range = (0.0, 10.0)  # Time range - shorter time period for better resolution
+    t_range = (0.0, 40.0)  # Time range - shorter time period for better resolution
     
     # Training parameters from command line args
     epochs = args.epochs
     print_interval = args.print_interval
     autosave_interval = args.autosave_interval
     num_batches = args.num_batches
-    use_cpu = args.use_cpu
     architecture = args.architecture
     
     # Memory management parameters
@@ -40,12 +38,9 @@ def main():
 
     nx = 70
     ny = 70
-    nt = 50
+    nt = 150
     
-    n_boundary = 300
-    
-    if use_cpu:
-        print("\n*** USING CPU FOR TRAINING (GPU DISABLED) ***")
+    n_boundary = 100
     
     try:
         # Initialize cylinder flow
@@ -75,7 +70,6 @@ def main():
                 print_interval=print_interval,
                 autosaveInterval=autosave_interval,
                 num_batches=num_batches,
-                use_cpu=use_cpu,
                 num_spatial_batches=spatial_batches,
                 num_temporal_batches=temporal_batches
             )
@@ -86,11 +80,6 @@ def main():
         
         # Start prediction
         print("\nStarting prediction...")
-        # Clean memory before prediction
-        if not use_cpu:
-            tf.keras.backend.clear_session()
-            import gc
-            gc.collect()
             
         cylinder.predict()
         cylinder.animate_flow()

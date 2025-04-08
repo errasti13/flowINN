@@ -172,70 +172,45 @@ class UnsteadyNavierStokesLoss(NavierStokesBaseLoss):
         for ic_name, initial_data in self.mesh.initialConditions.items():
             try:
                 # Check if all required coordinates exist
-                has_all_coords = True
-                for coord in ['x', 'y', 't']:
-                    if coord not in initial_data:
-                        print(f"Warning: Missing '{coord}' coordinate for initial condition '{ic_name}'. Skipping.")
-                        has_all_coords = False
-                        break
-                
-                if not has_all_coords:
+                required_coords = ['x', 'y', 't']
+                if not all(coord in initial_data for coord in required_coords):
+                    missing_coords = [coord for coord in required_coords if coord not in initial_data]
+                    print(f"Warning: Missing coordinates {missing_coords} in initial condition '{ic_name}'. Skipping.")
                     continue
                 
-                # Handle mesh points with appropriate flattening
-                x_data = initial_data['x']
-                y_data = initial_data['y']
-                t_data = initial_data['t']
-                
-                # Get shapes of each coordinate and verify consistency
-                x_shape = np.asarray(x_data).shape
-                y_shape = np.asarray(y_data).shape
-                t_shape = np.asarray(t_data).shape
-                
-                # Check if shapes match
-                if x_shape != y_shape or x_shape != t_shape:
-                    print(f"Warning: Coordinate shape mismatch in initial condition '{ic_name}':")
-                    print(f"  x shape: {x_shape}, y shape: {y_shape}, t shape: {t_shape}")
-                    print(f"  Attempting to process anyway by flattening all arrays.")
-                
-                # Convert to tensors with proper flattening
-                x_tensor = tf.reshape(tf.convert_to_tensor(x_data, dtype=tf.float32), [-1, 1])
-                y_tensor = tf.reshape(tf.convert_to_tensor(y_data, dtype=tf.float32), [-1, 1])
-                t_tensor = tf.reshape(tf.convert_to_tensor(t_data, dtype=tf.float32), [-1, 1])
-                
-                # Verify all tensors have the same first dimension after reshaping
-                x_size = int(x_tensor.shape[0])
-                y_size = int(y_tensor.shape[0])
-                t_size = int(t_tensor.shape[0])
-                
-                # Handle dimension mismatches - Use numpy and Python conditionals instead of tensor ops
-                if x_size != y_size or x_size != t_size:
-                    print(f"Warning: After reshaping, point counts don't match in '{ic_name}':")
-                    print(f"  x: {x_size}, y: {y_size}, t: {t_size}")
+                # Extract coordinate data with proper error checking
+                try:
+                    # Convert to numpy arrays for consistent handling
+                    x_data = np.asarray(initial_data['x'])
+                    y_data = np.asarray(initial_data['y'])
+                    t_data = np.asarray(initial_data['t'])
                     
-                    # Try to make them match by repeating smaller tensors to match the largest
-                    max_size = max(x_size, y_size, t_size)
+                    # Flatten all arrays to ensure consistent shapes
+                    x_flattened = x_data.flatten()
+                    y_flattened = y_data.flatten()
+                    t_flattened = t_data.flatten()
                     
-                    # Adjust x tensor if needed
-                    if x_size == 1 and max_size > 1:
-                        x_tensor = tf.repeat(x_tensor, max_size, axis=0)
-                    elif x_size != max_size:
-                        print(f"  Cannot automatically resize x tensor from {x_size} to {max_size}. Skipping.")
-                        continue
+                    # Check if all arrays have the same length after flattening
+                    sizes = [len(x_flattened), len(y_flattened), len(t_flattened)]
+                    if not all(size == sizes[0] for size in sizes):
+                        print(f"Warning: Coordinate arrays have different lengths after flattening in '{ic_name}':")
+                        print(f"  x: {sizes[0]}, y: {sizes[1]}, t: {sizes[2]}")
                         
-                    # Adjust y tensor if needed
-                    if y_size == 1 and max_size > 1:
-                        y_tensor = tf.repeat(y_tensor, max_size, axis=0)
-                    elif y_size != max_size:
-                        print(f"  Cannot automatically resize y tensor from {y_size} to {max_size}. Skipping.")
-                        continue
-                        
-                    # Adjust t tensor if needed
-                    if t_size == 1 and max_size > 1:
-                        t_tensor = tf.repeat(t_tensor, max_size, axis=0)
-                    elif t_size != max_size:
-                        print(f"  Cannot automatically resize t tensor from {t_size} to {max_size}. Skipping.")
-                        continue
+                        # Use the smallest common size to avoid index errors
+                        min_size = min(sizes)
+                        x_flattened = x_flattened[:min_size]
+                        y_flattened = y_flattened[:min_size]
+                        t_flattened = t_flattened[:min_size]
+                        print(f"  Using first {min_size} points for each coordinate.")
+                    
+                    # Convert to tensors with proper reshaping
+                    x_tensor = tf.reshape(tf.convert_to_tensor(x_flattened, dtype=tf.float32), [-1, 1])
+                    y_tensor = tf.reshape(tf.convert_to_tensor(y_flattened, dtype=tf.float32), [-1, 1])
+                    t_tensor = tf.reshape(tf.convert_to_tensor(t_flattened, dtype=tf.float32), [-1, 1])
+                    
+                except Exception as e:
+                    print(f"Error processing coordinate data in initial condition '{ic_name}': {str(e)}")
+                    continue
                 
                 # Concatenate coordinate tensors
                 input_tensor = tf.concat([x_tensor, y_tensor, t_tensor], axis=1)
@@ -371,7 +346,8 @@ class UnsteadyNavierStokesLoss(NavierStokesBaseLoss):
                 
         else:
             # Handle single direction gradients
-            coord_idx = {'x': 0, 'y': 1, 'z': 2}.get(direction)
+            # Update: Include 't' for time derivative in unsteady problems
+            coord_idx = {'x': 0, 'y': 1, 't': 2, 'z': 2}.get(direction)
             if coord_idx is not None and coord_idx < len(coords):
                 if var_name == 'p':
                     var_tensor = tf.reshape(p_pred, [-1, 1])
@@ -409,10 +385,10 @@ class UnsteadyNavierStokesLoss(NavierStokesBaseLoss):
                     ]
                     base_coords = [tf.reshape(coord, [-1, 1]) for coord in base_coords]
                     
-                    # Get coordinates for coupled boundary
+                    # Get coordinates for coupled boundary - FIX: use 't' instead of 'z' for unsteady flows
                     coupled_coords = [
                         tf.convert_to_tensor(coupled_data[coord], dtype=tf.float32)
-                        for coord in ['x', 'y', 'z'] if coord in coupled_data
+                        for coord in ['x', 'y', 't'] if coord in coupled_data
                     ]
                     coupled_coords = [tf.reshape(coord, [-1, 1]) for coord in coupled_coords]
 

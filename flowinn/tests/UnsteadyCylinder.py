@@ -53,7 +53,7 @@ class UnsteadyCylinder:
                 fourier_dim=32,
                 layer_sizes=[256] * 6,
                 learning_rate=0.001,
-                trainable_fourier=True,
+                trainable_fourier=False,
                 use_adaptive_activation=True
             )
         elif architecture == 'fast_mfn':
@@ -252,6 +252,10 @@ class UnsteadyCylinder:
                     }
                 }
             }
+            
+            # Validate boundary conditions
+            self._validate_boundary_conditions()
+            
         except Exception as e:
             self.logger.error(f"Mesh generation failed: {str(e)}")
             raise
@@ -277,8 +281,8 @@ class UnsteadyCylinder:
                 'y': None,
                 't': None,
                 'conditions': {
-                    'u': {'gradient': 0.0, 'direction': 'x'},
-                    'v': {'gradient': 0.0, 'direction': 'x'},
+                    'u': {'value': 1.0},
+                    'v': {'value': 0.0},
                     'p': {'value': 0.0}  # Set pressure value at outlet
                 },
                 'bc_type': self.outlet_bc
@@ -288,9 +292,9 @@ class UnsteadyCylinder:
                 'y': None,
                 't': None,
                 'conditions': {
-                    'u': {'gradient': 0.0, 'direction': 'y'},
+                    'u': {'value': 1.0},
                     'v': {'value': 0.0},
-                    'p': {'gradient': 0.0, 'direction': 'y'}
+                    'p': None
                 },
                 'bc_type': self.wall_bc
             },
@@ -299,9 +303,9 @@ class UnsteadyCylinder:
                 'y': None,
                 't': None,
                 'conditions': {
-                    'u': {'gradient': 0.0, 'direction': 'y'},
+                    'u': {'value': 1.0},
                     'v': {'value': 0.0},
-                    'p': {'gradient': 0.0, 'direction': 'y'}
+                    'p': None
                 },
                 'bc_type': self.wall_bc
             }
@@ -322,6 +326,44 @@ class UnsteadyCylinder:
                 'isInterior': True  # Explicitly mark as interior boundary
             }
         }
+
+    def _validate_boundary_conditions(self):
+        """Validate boundary conditions before mesh generation."""
+        # Check exterior boundaries
+        for name, boundary in self.mesh.boundaries.items():
+            if any(key not in boundary for key in ['x', 'y', 't', 'conditions', 'bc_type']):
+                raise ValueError(f"Missing required fields in boundary {name}")
+                
+            # For boundaries with coordinates set, check them
+            if all(coord in boundary and boundary[coord] is not None for coord in ['x', 'y', 't']):
+                # Check that all coordinate arrays have the same shape
+                shapes = [np.asarray(boundary[coord]).shape for coord in ['x', 'y', 't']]
+                if not all(shape == shapes[0] for shape in shapes):
+                    raise ValueError(f"Coordinate shape mismatch in boundary {name}: {shapes}")
+
+        # Check interior boundaries
+        if hasattr(self.mesh, 'interiorBoundaries'):
+            for name, boundary in self.mesh.interiorBoundaries.items():
+                if any(key not in boundary for key in ['x', 'y', 't', 'conditions', 'bc_type']):
+                    raise ValueError(f"Missing required fields in interior boundary {name}")
+                    
+                # For boundaries with coordinates set, check them
+                if all(coord in boundary and boundary[coord] is not None for coord in ['x', 'y', 't']):
+                    # Check that all coordinate arrays have the same shape
+                    shapes = [np.asarray(boundary[coord]).shape for coord in ['x', 'y', 't']]
+                    if not all(shape == shapes[0] for shape in shapes):
+                        raise ValueError(f"Coordinate shape mismatch in interior boundary {name}: {shapes}")
+
+        # Check initial conditions if they exist
+        if hasattr(self.mesh, 'initialConditions'):
+            for name, ic_data in self.mesh.initialConditions.items():
+                if any(key not in ic_data for key in ['x', 'y', 't', 'conditions']):
+                    raise ValueError(f"Missing required fields in initial condition {name}")
+                
+                # Check that all coordinate arrays have the same shape
+                shapes = [np.asarray(ic_data[coord]).shape for coord in ['x', 'y', 't']]
+                if not all(shape == shapes[0] for shape in shapes):
+                    raise ValueError(f"Coordinate shape mismatch in initial condition {name}: {shapes}")
 
     def getLossFunction(self):
         """
@@ -357,7 +399,7 @@ class UnsteadyCylinder:
                 return loss_wrapper
     
     def train(self, epochs=None, print_interval=100, autosaveInterval=10000, num_batches=10, 
-            use_cpu=False, num_spatial_batches=4, num_temporal_batches=3):
+            num_spatial_batches=4, num_temporal_batches=3):
         """
         Train the model using moving time window approach from the paper.
         
@@ -366,8 +408,6 @@ class UnsteadyCylinder:
             print_interval: Interval for printing loss information
             autosaveInterval: Interval for autosaving the model
             num_batches: Number of batches for mini-batch training
-            use_cpu: Whether to use CPU instead of GPU
-            memory_limit: GPU memory limit in MB (2000MB = ~2GB, default)
             num_spatial_batches: Number of batches to divide spatial domain into
             num_temporal_batches: Number of batches to divide temporal domain into
         """
@@ -398,7 +438,7 @@ class UnsteadyCylinder:
                 save_name=self.problemTag,
                 num_spatial_batches=num_spatial_batches,
                 num_temporal_batches=num_temporal_batches,
-                patience=100
+                patience=20
             )
             
             print(f"Training completed.")
